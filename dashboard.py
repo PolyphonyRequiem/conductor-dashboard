@@ -1402,7 +1402,7 @@ async def action_review(request: Request):
     if not log_file:
         return {"error": "log_file required"}, 400
     wf_name = _extract_workflow_name(log_file)
-    cwd = _resolve_workflow_dir(wf_name)
+    cwd = _resolve_workflow_dir(log_file, wf_name)
     prompt = f"Review the conductor workflow results in {log_file}. Identify any issues worth filing and file them as GitHub issues."
     return _spawn_terminal_with_copilot(prompt, cwd)
 
@@ -1415,7 +1415,7 @@ async def action_investigate(request: Request):
     if not log_file:
         return {"error": "log_file required"}, 400
     wf_name = _extract_workflow_name(log_file)
-    cwd = _resolve_workflow_dir(wf_name)
+    cwd = _resolve_workflow_dir(log_file, wf_name)
     prompt = f"Investigate the failure in conductor workflow log {log_file}. Analyze the error, identify root cause, and advise on fixes."
     return _spawn_terminal_with_copilot(prompt, cwd)
 
@@ -1431,7 +1431,7 @@ async def action_restart(request: Request):
     if not workflow_path:
         return {"error": "Could not determine workflow path from log file"}
     wf_name = _extract_workflow_name(log_file)
-    cwd = _resolve_workflow_dir(wf_name)
+    cwd = _resolve_workflow_dir(log_file, wf_name)
     try:
         subprocess.Popen(
             ["conductor", "run", workflow_path, "--web-bg"],
@@ -1443,8 +1443,43 @@ async def action_restart(request: Request):
         return {"error": str(e)}
 
 
-def _resolve_workflow_dir(wf_name: str) -> Path:
-    """Return the project directory for a workflow name, or HOME as fallback."""
+def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
+    """Return the project directory a workflow was operating on.
+
+    Strategy:
+      1. Scan early tool-call events for file paths and derive the project root.
+      2. Fall back to the static WORKFLOW_DIRS mapping.
+      3. Fall back to HOME.
+    """
+    # 1. Dynamic: inspect the first tool calls for file path arguments
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            checked = 0
+            for line in f:
+                if checked > 200:  # only scan first 200 lines
+                    break
+                checked += 1
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                    if evt.get("type") == "agent_tool_start":
+                        args = evt.get("data", {}).get("arguments", {})
+                        if isinstance(args, dict):
+                            for v in args.values():
+                                if isinstance(v, str):
+                                    m = re.search(r"([A-Za-z]:[/\\][^\"'\s]*[/\\]projects[/\\][^/\\\"'\s]+)", v)
+                                    if m:
+                                        candidate = Path(m.group(1).replace("/", os.sep))
+                                        if candidate.exists():
+                                            return candidate
+                except (json.JSONDecodeError, KeyError):
+                    continue
+    except Exception:
+        pass
+
+    # 2. Static mapping fallback
     for prefix, directory in WORKFLOW_DIRS.items():
         if wf_name.startswith(prefix):
             if directory.exists():
@@ -1479,18 +1514,26 @@ def _extract_workflow_name(log_file: str) -> str:
 
 
 def _spawn_terminal_with_copilot(prompt: str, cwd: Path | None = None) -> dict:
-    """Spawn a Windows Terminal tab with copilot in the right working directory."""
-    escaped = prompt.replace('"', '\\"')
+    """Add a new tab to Windows Terminal running agency copilot."""
+    escaped = prompt.replace("'", "''")  # PowerShell single-quote escape
     cwd_str = str(cwd) if cwd else str(Path.home())
-    cmd = f'cd /d "{cwd_str}" && copilot -p "{escaped}"'
+    ps_cmd = f"Set-Location '{cwd_str}'; agency copilot -p '{escaped}'"
     try:
-        subprocess.Popen(["wt.exe", "new-tab", "cmd", "/k", cmd],
-                        creationflags=subprocess.CREATE_NO_WINDOW)
+        # wt new-tab adds to the most recently focused Windows Terminal window
+        subprocess.Popen(
+            ["wt.exe", "new-tab", "--title", "Conductor Agent",
+             "pwsh.exe", "-NoExit", "-Command", ps_cmd],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
         return {"status": "launched", "method": "wt", "cwd": cwd_str}
     except FileNotFoundError:
         try:
-            subprocess.Popen(f'start cmd /k {cmd}', shell=True)
-            return {"status": "launched", "method": "cmd", "cwd": cwd_str}
+            # Fallback: try powershell directly in a new window
+            subprocess.Popen(
+                ["pwsh.exe", "-NoExit", "-Command", ps_cmd],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+            return {"status": "launched", "method": "pwsh", "cwd": cwd_str}
         except Exception as e:
             return {"error": str(e)}
 
