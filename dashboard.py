@@ -578,6 +578,12 @@ WORK_ITEM_URLS: dict[str, str] = {
     "twig": "https://dev.azure.com/dangreen-msft/Twig/_workitems/edit/{id}",
 }
 
+# Map workflow name prefixes to the project directory they operate on.
+WORKFLOW_DIRS: dict[str, Path] = {
+    "twig": Path.home() / "projects" / "twig2",
+    "cloudvault": Path.home() / "projects" / "cloudvault-service-api",
+}
+
 
 def _work_item_html(run: WorkflowRun, font_size: str = "0.85rem") -> str:
     """Build HTML snippet for a work item link, or empty string if none."""
@@ -803,6 +809,11 @@ function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function jsEsc(s) {
+    if (!s) return '';
+    return String(s).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
+}
+
 function fmtTokens(n) {
     if (!n) return '\\u2014';
     return Number(n).toLocaleString();
@@ -891,12 +902,15 @@ function renderActiveRuns(runs) {
         var wiBadge = wiHtml ? ' '+wiHtml : '';
 
         html += '<div class="run-card fade-in'+gateClass+'">';
-        html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
+        html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+jsEsc(key)+'\\') ">';
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
         html += '<span class="wf-name">'+esc(r.name)+'</span>'+wiBadge;
         html += '<span style="color:var(--text2);margin-left:auto">'+esc(r.elapsed)+'</span>';
         html += '<span>'+agentStatus+'</span>';
         html += '<span>'+fmtCost(r.total_cost)+'</span>';
+        if (r.dashboard_url) {
+            html += '<a class="action-btn" href="'+esc(r.dashboard_url)+'" target="_blank" title="Open per-run conductor dashboard" onclick="event.stopPropagation()" style="margin-left:8px;text-decoration:none">&#128279; Dashboard</a>';
+        }
         html += '</div>';
 
         // Expanded body
@@ -912,7 +926,7 @@ function renderActiveRuns(runs) {
         }
         html += '<div>Iteration: '+r.iteration+' &bull; '+r.agent_count+' agents completed</div>';
         if (r.dashboard_url) {
-            html += '<div style="margin-top:4px"><a href="'+esc(r.dashboard_url)+'" target="_blank">Dashboard :'+r.dashboard_port+'</a></div>';
+            html += '<div style="margin-top:4px"><a class="action-btn" href="'+esc(r.dashboard_url)+'" target="_blank" title="Open per-run conductor dashboard" style="text-decoration:none;display:inline-block">&#128279; Dashboard :'+r.dashboard_port+'</a></div>';
         }
         html += '<div style="margin-top:4px"><code class="replay-cmd">'+esc(r.replay_cmd)+'</code></div>';
         html += '</div></div>';
@@ -951,7 +965,7 @@ function renderCompletedRuns(runs) {
         var wiHtml = workItemHtml(r);
         var nameExtra = wiHtml ? '<br>'+wiHtml : (r.purpose ? '<br><span style="color:var(--text2);font-size:0.75rem">'+esc(r.purpose)+'</span>' : '');
 
-        html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand details" onclick="toggleExpand(\\'completed-'+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
+        html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand details" onclick="toggleExpand(\\'completed-'+jsEsc(key)+'\\') ">';
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
         html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
         html += '<td>'+esc(r.elapsed)+'</td>';
@@ -959,8 +973,8 @@ function renderCompletedRuns(runs) {
         html += '<td>'+fmtTokens(r.total_tokens)+'</td>';
         html += '<td>'+r.agent_count+'</td>';
         html += '<td>';
-        html += '<button class="action-btn review" title="Open Copilot to review results and file issues" onclick="event.stopPropagation();actionReview(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&#128203; Review</button>';
-        html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
+        html += '<button class="action-btn review" title="Open Copilot to review results and file issues" onclick="event.stopPropagation();actionReview(\\''+jsEsc(key)+'\\')">&#128203; Review</button>';
+        html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+jsEsc(key)+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
         html += '</td></tr>';
 
         // Expandable detail row
@@ -1010,7 +1024,7 @@ function renderFailedRuns(runs) {
         var nameExtra = wiHtml ? '<br>'+wiHtml : '';
         var errMsgShort = r.error_message ? (r.error_message.length > 80 ? esc(r.error_message.substring(0,80))+'\\u2026' : esc(r.error_message)) : '\\u2014';
 
-        html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand error details" onclick="toggleExpand(\\'failed-'+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
+        html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand error details" onclick="toggleExpand(\\'failed-'+jsEsc(key)+'\\') ">';
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
         html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
         html += '<td>'+esc(r.elapsed)+'</td>';
@@ -1018,9 +1032,9 @@ function renderFailedRuns(runs) {
         html += '<td>'+(r.failed_agent ? '<span class="err-agent">'+esc(r.failed_agent)+'</span>' : '\\u2014')+'</td>';
         html += '<td>'+errMsgShort+'</td>';
         html += '<td>';
-        html += '<button class="action-btn investigate" title="Open Copilot to analyze the failure and advise on fixes" onclick="event.stopPropagation();actionInvestigate(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&#128269; Investigate</button>';
-        html += '<button class="action-btn restart" title="Re-run this workflow from scratch" onclick="event.stopPropagation();actionRestart(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&#128260; Restart</button>';
-        html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
+        html += '<button class="action-btn investigate" title="Open Copilot to analyze the failure and advise on fixes" onclick="event.stopPropagation();actionInvestigate(\\''+jsEsc(key)+'\\')">&#128269; Investigate</button>';
+        html += '<button class="action-btn restart" title="Re-run this workflow from scratch" onclick="event.stopPropagation();actionRestart(\\''+jsEsc(key)+'\\')">&#128260; Restart</button>';
+        html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+jsEsc(key)+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
         html += '</td></tr>';
 
         // Expandable detail row — full error message
@@ -1387,8 +1401,10 @@ async def action_review(request: Request):
     log_file = body.get("log_file", "")
     if not log_file:
         return {"error": "log_file required"}, 400
+    wf_name = _extract_workflow_name(log_file)
+    cwd = _resolve_workflow_dir(wf_name)
     prompt = f"Review the conductor workflow results in {log_file}. Identify any issues worth filing and file them as GitHub issues."
-    return _spawn_terminal_with_copilot(prompt)
+    return _spawn_terminal_with_copilot(prompt, cwd)
 
 
 @app.post("/api/action/investigate")
@@ -1398,8 +1414,10 @@ async def action_investigate(request: Request):
     log_file = body.get("log_file", "")
     if not log_file:
         return {"error": "log_file required"}, 400
+    wf_name = _extract_workflow_name(log_file)
+    cwd = _resolve_workflow_dir(wf_name)
     prompt = f"Investigate the failure in conductor workflow log {log_file}. Analyze the error, identify root cause, and advise on fixes."
-    return _spawn_terminal_with_copilot(prompt)
+    return _spawn_terminal_with_copilot(prompt, cwd)
 
 
 @app.post("/api/action/restart")
@@ -1409,33 +1427,70 @@ async def action_restart(request: Request):
     log_file = body.get("log_file", "")
     if not log_file:
         return {"error": "log_file required"}, 400
-    # Extract workflow path from event log
     workflow_path = _extract_workflow_path(log_file)
     if not workflow_path:
         return {"error": "Could not determine workflow path from log file"}
+    wf_name = _extract_workflow_name(log_file)
+    cwd = _resolve_workflow_dir(wf_name)
     try:
         subprocess.Popen(
             ["conductor", "run", workflow_path, "--web-bg"],
+            cwd=str(cwd),
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
         )
-        return {"status": "started", "workflow": workflow_path}
+        return {"status": "started", "workflow": workflow_path, "cwd": str(cwd)}
     except Exception as e:
         return {"error": str(e)}
 
 
-def _spawn_terminal_with_copilot(prompt: str) -> dict:
-    """Spawn a Windows Terminal tab (or cmd fallback) with copilot-cli."""
-    escaped = prompt.replace('"', '\\"')
-    cmd = f'copilot-cli -p "{escaped}"'
+def _resolve_workflow_dir(wf_name: str) -> Path:
+    """Return the project directory for a workflow name, or HOME as fallback."""
+    for prefix, directory in WORKFLOW_DIRS.items():
+        if wf_name.startswith(prefix):
+            if directory.exists():
+                return directory
+    return Path.home()
+
+
+def _extract_workflow_name(log_file: str) -> str:
+    """Extract workflow name from a log file path or its content."""
+    fname = Path(log_file).stem
+    if fname.endswith(".events"):
+        fname = fname[: -len(".events")]
+    m = re.match(r"conductor-(.+)-(\d{8}-\d{6})", fname)
+    if m:
+        return m.group(1)
+    # Fallback: read the first workflow_started event
     try:
-        # Try Windows Terminal first
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                    if evt.get("type") == "workflow_started":
+                        return evt.get("data", {}).get("name", "")
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        pass
+    return ""
+
+
+def _spawn_terminal_with_copilot(prompt: str, cwd: Path | None = None) -> dict:
+    """Spawn a Windows Terminal tab with copilot in the right working directory."""
+    escaped = prompt.replace('"', '\\"')
+    cwd_str = str(cwd) if cwd else str(Path.home())
+    cmd = f'cd /d "{cwd_str}" && copilot -p "{escaped}"'
+    try:
         subprocess.Popen(["wt.exe", "new-tab", "cmd", "/k", cmd],
                         creationflags=subprocess.CREATE_NO_WINDOW)
-        return {"status": "launched", "method": "wt"}
+        return {"status": "launched", "method": "wt", "cwd": cwd_str}
     except FileNotFoundError:
         try:
             subprocess.Popen(f'start cmd /k {cmd}', shell=True)
-            return {"status": "launched", "method": "cmd"}
+            return {"status": "launched", "method": "cmd", "cwd": cwd_str}
         except Exception as e:
             return {"error": str(e)}
 
