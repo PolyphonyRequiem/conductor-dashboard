@@ -1514,23 +1514,35 @@ def _extract_workflow_name(log_file: str) -> str:
 
 
 def _spawn_terminal_with_copilot(prompt: str, cwd: Path | None = None) -> dict:
-    """Add a new tab to Windows Terminal running agency copilot."""
+    """Add a new tab to Windows Terminal running agency copilot.
+
+    Writes a temporary .ps1 script to avoid wt.exe argument-quoting issues,
+    then launches it in a new tab of the most recent Windows Terminal window.
+    """
+    import tempfile
+
     escaped = prompt.replace("'", "''")  # PowerShell single-quote escape
     cwd_str = str(cwd) if cwd else str(Path.home())
-    ps_cmd = f"Set-Location '{cwd_str}'; agency copilot -p '{escaped}'"
+
+    script = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".ps1", prefix="conductor-action-",
+        dir=str(TEMP_DIR), delete=False,
+    )
+    script.write(f"Set-Location -LiteralPath '{cwd_str}'\n")
+    script.write(f"agency copilot -p '{escaped}'\n")
+    script.close()
+
     try:
-        # wt new-tab adds to the most recently focused Windows Terminal window
         subprocess.Popen(
-            ["wt.exe", "new-tab", "--title", "Conductor Agent",
-             "pwsh.exe", "-NoExit", "-Command", ps_cmd],
+            ["wt.exe", "-w", "0", "new-tab", "--title", "Conductor Agent",
+             "pwsh.exe", "-NoExit", "-File", script.name],
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         return {"status": "launched", "method": "wt", "cwd": cwd_str}
     except FileNotFoundError:
         try:
-            # Fallback: try powershell directly in a new window
             subprocess.Popen(
-                ["pwsh.exe", "-NoExit", "-Command", ps_cmd],
+                ["pwsh.exe", "-NoExit", "-File", script.name],
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
             return {"status": "launched", "method": "pwsh", "cwd": cwd_str}
