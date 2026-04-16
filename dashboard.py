@@ -891,7 +891,7 @@ function renderActiveRuns(runs) {
         var wiBadge = wiHtml ? ' '+wiHtml : '';
 
         html += '<div class="run-card fade-in'+gateClass+'">';
-        html += '<div class="run-card-header" onclick="toggleExpand(\''+esc(key).replace(/'/g,"\\\\'")+'\')">';
+        html += '<div class="run-card-header" onclick="toggleExpand(\\''+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
         html += '<span class="wf-name">'+esc(r.name)+'</span>'+wiBadge;
         html += '<span style="color:var(--text2);margin-left:auto">'+esc(r.elapsed)+'</span>';
@@ -951,7 +951,7 @@ function renderCompletedRuns(runs) {
         var wiHtml = workItemHtml(r);
         var nameExtra = wiHtml ? '<br>'+wiHtml : (r.purpose ? '<br><span style="color:var(--text2);font-size:0.75rem">'+esc(r.purpose)+'</span>' : '');
 
-        html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" onclick="toggleExpand(\'completed-'+esc(key).replace(/'/g,"\\\\'")+'\')">';
+        html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" onclick="toggleExpand(\\'completed-'+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
         html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
         html += '<td>'+esc(r.elapsed)+'</td>';
@@ -959,8 +959,8 @@ function renderCompletedRuns(runs) {
         html += '<td>'+fmtTokens(r.total_tokens)+'</td>';
         html += '<td>'+r.agent_count+'</td>';
         html += '<td>';
-        html += '<button class="action-btn review" onclick="event.stopPropagation();actionReview(\''+esc(key).replace(/'/g,"\\\\'")+'\')">&#128203; Review</button>';
-        html += '<button class="action-btn" onclick="event.stopPropagation();toggleReviewed(\''+esc(key).replace(/'/g,"\\\\'")+'\')">'+( isReviewed ? '&#9744;' : '&#9745;')+'</button>';
+        html += '<button class="action-btn review" onclick="event.stopPropagation();actionReview(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&amp;#128203; Review</button>';
+        html += '<button class="action-btn" onclick="event.stopPropagation();toggleReviewed(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">'+ ( isReviewed ? '&#9744;' : '&#9745;')+'</button>';
         html += '</td></tr>';
 
         // Expandable detail row
@@ -1010,7 +1010,7 @@ function renderFailedRuns(runs) {
         var nameExtra = wiHtml ? '<br>'+wiHtml : '';
         var errMsgShort = r.error_message ? (r.error_message.length > 80 ? esc(r.error_message.substring(0,80))+'\\u2026' : esc(r.error_message)) : '\\u2014';
 
-        html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" onclick="toggleExpand(\'failed-'+esc(key).replace(/'/g,"\\\\'")+'\')">';
+        html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" onclick="toggleExpand(\\'failed-'+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
         html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
         html += '<td>'+esc(r.elapsed)+'</td>';
@@ -1018,9 +1018,9 @@ function renderFailedRuns(runs) {
         html += '<td>'+(r.failed_agent ? '<span class="err-agent">'+esc(r.failed_agent)+'</span>' : '\\u2014')+'</td>';
         html += '<td>'+errMsgShort+'</td>';
         html += '<td>';
-        html += '<button class="action-btn investigate" onclick="event.stopPropagation();actionInvestigate(\''+esc(key).replace(/'/g,"\\\\'")+'\')">&#128269; Investigate</button>';
-        html += '<button class="action-btn restart" onclick="event.stopPropagation();actionRestart(\''+esc(key).replace(/'/g,"\\\\'")+'\')">&#128260; Restart</button>';
-        html += '<button class="action-btn" onclick="event.stopPropagation();toggleReviewed(\''+esc(key).replace(/'/g,"\\\\'")+'\')">'+( isReviewed ? '&#9744;' : '&#9745;')+'</button>';
+        html += '<button class="action-btn investigate" onclick="event.stopPropagation();actionInvestigate(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&amp;#128269; Investigate</button>';
+        html += '<button class="action-btn restart" onclick="event.stopPropagation();actionRestart(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&amp;#128260; Restart</button>';
+        html += '<button class="action-btn" onclick="event.stopPropagation();toggleReviewed(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">'+ ( isReviewed ? '&#9744;' : '&#9745;')+'</button>';
         html += '</td></tr>';
 
         // Expandable detail row — full error message
@@ -1252,7 +1252,7 @@ def _compute_status():
     active = _load_active_runs()
     costs = _aggregate_costs(runs)
     errors = _aggregate_errors(runs)
-    gates = sum(1 for r in runs if r.gate_waiting)
+    gates = sum(1 for r in runs if r.gate_waiting and r.status == "running")
     return {
         "runs": len(runs),
         "completed": sum(1 for r in runs if r.status == "completed"),
@@ -1344,7 +1344,7 @@ def _compute_dashboard() -> dict:
     other_runs = [_serialize_run(r, ts_to_port) for r in sorted_runs
                   if r.status not in ("running", "completed", "failed")]
 
-    gates_waiting = sum(1 for r in runs if r.gate_waiting)
+    gates_waiting = sum(1 for r in runs if r.gate_waiting and r.status == "running")
 
     return {
         "active_runs": active_runs,
