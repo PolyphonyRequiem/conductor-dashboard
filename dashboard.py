@@ -766,10 +766,10 @@ a:hover { text-decoration: underline; }
 <h2>&#128260; Active Runs</h2>
 <div id="active-runs"></div>
 
-<h2>&#9989; Completed Runs <button id="toggle-reviewed-completed" class="toggle-btn" onclick="toggleShowReviewedCompleted()">Show Reviewed</button></h2>
+<h2>&#9989; Completed Runs <button id="toggle-reviewed-completed" class="toggle-btn" title="Show or hide runs you have already reviewed" onclick="toggleShowReviewedCompleted()">Show Reviewed</button></h2>
 <div id="completed-runs"></div>
 
-<h2>&#10060; Failed Runs <button id="toggle-reviewed-failed" class="toggle-btn" onclick="toggleShowReviewedFailed()">Show Reviewed</button></h2>
+<h2>&#10060; Failed Runs <button id="toggle-reviewed-failed" class="toggle-btn" title="Show or hide failed runs you have already reviewed" onclick="toggleShowReviewedFailed()">Show Reviewed</button></h2>
 <div id="failed-runs"></div>
 
 <h2>&#128295; Checkpoint Recovery</h2>
@@ -891,7 +891,7 @@ function renderActiveRuns(runs) {
         var wiBadge = wiHtml ? ' '+wiHtml : '';
 
         html += '<div class="run-card fade-in'+gateClass+'">';
-        html += '<div class="run-card-header" onclick="toggleExpand(\\''+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
+        html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
         html += '<span class="wf-name">'+esc(r.name)+'</span>'+wiBadge;
         html += '<span style="color:var(--text2);margin-left:auto">'+esc(r.elapsed)+'</span>';
@@ -951,7 +951,7 @@ function renderCompletedRuns(runs) {
         var wiHtml = workItemHtml(r);
         var nameExtra = wiHtml ? '<br>'+wiHtml : (r.purpose ? '<br><span style="color:var(--text2);font-size:0.75rem">'+esc(r.purpose)+'</span>' : '');
 
-        html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" onclick="toggleExpand(\\'completed-'+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
+        html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand details" onclick="toggleExpand(\\'completed-'+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
         html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
         html += '<td>'+esc(r.elapsed)+'</td>';
@@ -959,8 +959,8 @@ function renderCompletedRuns(runs) {
         html += '<td>'+fmtTokens(r.total_tokens)+'</td>';
         html += '<td>'+r.agent_count+'</td>';
         html += '<td>';
-        html += '<button class="action-btn review" onclick="event.stopPropagation();actionReview(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&amp;#128203; Review</button>';
-        html += '<button class="action-btn" onclick="event.stopPropagation();toggleReviewed(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">'+ ( isReviewed ? '&#9744;' : '&#9745;')+'</button>';
+        html += '<button class="action-btn review" title="Open Copilot to review results and file issues" onclick="event.stopPropagation();actionReview(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&#128203; Review</button>';
+        html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
         html += '</td></tr>';
 
         // Expandable detail row
@@ -1010,7 +1010,7 @@ function renderFailedRuns(runs) {
         var nameExtra = wiHtml ? '<br>'+wiHtml : '';
         var errMsgShort = r.error_message ? (r.error_message.length > 80 ? esc(r.error_message.substring(0,80))+'\\u2026' : esc(r.error_message)) : '\\u2014';
 
-        html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" onclick="toggleExpand(\\'failed-'+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
+        html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand error details" onclick="toggleExpand(\\'failed-'+esc(key).replace(/'/g,"\\\\'")+'\\') ">';
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
         html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
         html += '<td>'+esc(r.elapsed)+'</td>';
@@ -1018,9 +1018,9 @@ function renderFailedRuns(runs) {
         html += '<td>'+(r.failed_agent ? '<span class="err-agent">'+esc(r.failed_agent)+'</span>' : '\\u2014')+'</td>';
         html += '<td>'+errMsgShort+'</td>';
         html += '<td>';
-        html += '<button class="action-btn investigate" onclick="event.stopPropagation();actionInvestigate(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&amp;#128269; Investigate</button>';
-        html += '<button class="action-btn restart" onclick="event.stopPropagation();actionRestart(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&amp;#128260; Restart</button>';
-        html += '<button class="action-btn" onclick="event.stopPropagation();toggleReviewed(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">'+ ( isReviewed ? '&#9744;' : '&#9745;')+'</button>';
+        html += '<button class="action-btn investigate" title="Open Copilot to analyze the failure and advise on fixes" onclick="event.stopPropagation();actionInvestigate(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&#128269; Investigate</button>';
+        html += '<button class="action-btn restart" title="Re-run this workflow from scratch" onclick="event.stopPropagation();actionRestart(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">&#128260; Restart</button>';
+        html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+esc(key).replace(/'/g,"\\\\'")+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
         html += '</td></tr>';
 
         // Expandable detail row — full error message
