@@ -973,7 +973,11 @@ function renderCompletedRuns(runs) {
         html += '<td>'+fmtTokens(r.total_tokens)+'</td>';
         html += '<td>'+r.agent_count+'</td>';
         html += '<td>';
-        html += '<button class="action-btn review" title="Open Copilot to review results and file issues" onclick="event.stopPropagation();actionReview(\\''+jsEsc(key)+'\\')">&#128203; Review</button>';
+        if (r.review_available) {
+            html += '<button class="action-btn review" title="File closeout findings using the closeout-filing skill" onclick="event.stopPropagation();actionReview(\\''+jsEsc(key)+'\\')">&#128203; Review</button>';
+        } else {
+            html += '<button class="action-btn" disabled title="Skill not found: '+esc(r.review_skill_path)+'" style="opacity:0.4;cursor:not-allowed">&#128203; Review</button>';
+        }
         html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+jsEsc(key)+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
         html += '</td></tr>';
 
@@ -1304,6 +1308,12 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int]) -> dict:
                 work_item_url = tpl.replace("{id}", r.work_item_id)
                 break
 
+    # Check if closeout-filing skill is available for review
+    wf_name = r.name or ""
+    cwd = _resolve_workflow_dir(r.log_file, wf_name)
+    skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
+    review_available = skill_path.exists()
+
     return {
         "log_file": r.log_file,
         "name": r.name,
@@ -1340,6 +1350,9 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int]) -> dict:
         "dashboard_port": dashboard_port,
         "dashboard_url": f"http://localhost:{dashboard_port}" if dashboard_port else "",
         "replay_cmd": f'conductor replay "{r.log_file}"',
+        "review_available": review_available,
+        "review_skill_path": str(skill_path),
+        "cwd": str(cwd),
     }
 
 
@@ -1396,14 +1409,20 @@ def _compute_dashboard() -> dict:
 
 @app.post("/api/action/review")
 async def action_review(request: Request):
-    """Open a terminal session to review completed workflow results."""
+    """Open a terminal session to file closeout findings using the closeout-filing skill."""
     body = await request.json()
     log_file = body.get("log_file", "")
     if not log_file:
         return {"error": "log_file required"}, 400
     wf_name = _extract_workflow_name(log_file)
     cwd = _resolve_workflow_dir(log_file, wf_name)
-    prompt = f"Review the conductor workflow results in {log_file}. Identify any issues worth filing and file them as GitHub issues."
+    skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
+    if not skill_path.exists():
+        return {"error": f"Closeout filing skill not found at {skill_path}"}
+    prompt = (
+        f"Load the skill at .github/skills/closeout-filing/SKILL.md and use it to "
+        f"review and file closeout findings from the conductor workflow log at {log_file}."
+    )
     return _spawn_terminal_with_copilot(prompt, cwd)
 
 
