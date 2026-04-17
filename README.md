@@ -9,9 +9,10 @@ Standalone aggregated status dashboard for [microsoft/conductor](https://github.
 - **Split completed/failed views** — separate tabs with full output and error details
 - **Action buttons** — review & file issues, investigate failures, restart workflows
 - **Hide-reviewed** — mark runs as reviewed with localStorage persistence
-- **Checkpoint recovery panel** — resume workflows from last checkpoint
 - **Cost breakdown** — per-workflow and per-model cost analysis
 - **Error pattern analysis** — identifies recurring failure patterns across runs
+- **Worktree badges** — surface the git worktree each active run is operating in
+- **Time-range-filtered metrics** — scope cost, duration, and error stats to a chosen window
 - **System tray icon** — overlay badges showing active count and gate-waiting indicator
 - **Windows startup registration** — auto-launch on login
 - **CSS animations** — smooth transitions on data changes
@@ -20,23 +21,40 @@ Standalone aggregated status dashboard for [microsoft/conductor](https://github.
 
 > _Screenshots coming soon._
 
-## Quick Start
+## Install / Update
+
+The dashboard deploys to `~/.copilot/conductor-dashboard/`, separate from this git checkout. Use `install.py` to manage that deployment:
 
 ```bash
-# Install dependencies
-pip install fastapi uvicorn pystray pillow
+# Install from this local checkout (default source = repo containing install.py)
+python install.py install local [--source PATH] [--no-start] [--with-tray]
 
-# Start the dashboard
-python dashboard.py
+# Install by cloning from GitHub
+python install.py install github [--repo URL] [--ref BRANCH] [--no-start] [--with-tray]
 
-# Or start the tray icon (also starts dashboard automatically)
-pythonw tray.py
+# Re-run the last install (local or github) to pick up new changes
+python install.py update [--no-start] [--with-tray]
 
-# Register for Windows startup
-python startup.py register
+# Show manifest, install dir mtimes, running dashboard/tray PIDs, startup shortcut
+python install.py status
+
+# Stop dashboard/tray and remove the install dir (optionally the startup shortcut)
+python install.py uninstall [--remove-startup] [--yes]
 ```
 
-The dashboard will be available at [http://localhost:9120](http://localhost:9120).
+Install/update writes `~/.copilot/conductor-dashboard/.install.json` recording the source, ref, and SHA, stops any running dashboard on the configured port, copies files, and restarts the dashboard (and tray, if it was running or `--with-tray` was passed). It polls `/api/dashboard` for up to 10 s and prints ✅ / ❌.
+
+### Alternative: run directly from the checkout
+
+```bash
+pip install fastapi uvicorn pystray pillow
+
+python dashboard.py          # start the dashboard
+pythonw tray.py              # start the tray (also starts the dashboard)
+python startup.py register   # register tray for Windows startup
+```
+
+The dashboard will be available at [http://localhost:8777](http://localhost:8777).
 
 ## Architecture
 
@@ -45,6 +63,7 @@ The dashboard will be available at [http://localhost:9120](http://localhost:9120
 | `dashboard.py` | FastAPI web server + API endpoints + embedded JS frontend |
 | `tray.py` | System tray icon with live status overlays |
 | `startup.py` | Windows startup shortcut registration |
+| `install.py` | Installer/updater CLI (local or GitHub source → `~/.copilot/conductor-dashboard/`) |
 
 ## API Endpoints
 

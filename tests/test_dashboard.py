@@ -559,4 +559,5 @@ class TestAPIEndpoints:
         assert "failed_runs" in data
         assert "stats" in data
         assert "costs" in data
-        assert "checkpoints" in data
+        assert "metrics" in data
+        assert "runs_raw" in data

@@ -13,9 +13,11 @@ import ctypes
 import json
 import os
 import re
+import shutil
 import subprocess
 import socket
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -77,6 +79,9 @@ class WorkflowRun:
     work_item_id: str = ""
     work_item_title: str = ""
     work_item_type: str = ""
+    # Liveness signals
+    tool_in_flight: bool = False  # last tool event was agent_tool_start with no matching complete
+    last_event_ts: float = 0.0    # timestamp of the most recent event parsed
 
 
 @dataclass
@@ -322,9 +327,18 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                 elif etype == "route_taken":
                     run.routes.append(data)
 
+                elif etype == "agent_tool_start":
+                    run.tool_in_flight = True
+
+                elif etype == "agent_tool_complete":
+                    run.tool_in_flight = False
+
                 # Track latest timestamp
-                if ts and ts > run.ended_at and run.status not in ("completed", "failed"):
-                    run.ended_at = ts
+                if ts:
+                    if ts > run.last_event_ts:
+                        run.last_event_ts = ts
+                    if ts > run.ended_at and run.status not in ("completed", "failed"):
+                        run.ended_at = ts
 
     except Exception:
         run.status = "parse_error"
@@ -363,14 +377,77 @@ def _parse_event_log(path: Path) -> WorkflowRun:
     return run
 
 
+def _pid_matches_run(active: "ActiveRun", run: WorkflowRun) -> bool:
+    """Return True if the alive PID-registered ActiveRun matches this event log.
+
+    Matching uses (1) workflow yaml stem == run.name and (2) started_at within
+    a 5-second tolerance (ISO UTC → epoch conversion).
+    """
+    if not active.workflow or not run.name:
+        return False
+    try:
+        yaml_stem = Path(active.workflow).stem
+    except Exception:
+        return False
+    if yaml_stem != run.name:
+        return False
+    if not active.started_at or not run.started_at:
+        return False
+    try:
+        pid_epoch = datetime.fromisoformat(active.started_at).timestamp()
+    except (ValueError, TypeError):
+        return False
+    return abs(pid_epoch - run.started_at) < 5.0
+
+
 def _load_event_logs() -> list[WorkflowRun]:
     runs: list[WorkflowRun] = []
     if not CONDUCTOR_DIR.exists():
         return runs
+    # Load alive PID-registered runs once so we can cross-check liveness below.
+    active_runs = [a for a in _load_active_runs() if a.alive]
+    now = time.time()
     for p in sorted(CONDUCTOR_DIR.glob("*.events.jsonl")):
         run = _parse_event_log(p)
-        if run.status != "invalid":
-            runs.append(run)
+        if run.status == "invalid":
+            continue
+
+        # Fix #1: if an alive PID file matches this run, force status=running
+        # regardless of mtime (backgrounded conductor runs may be silent for
+        # extended periods during long tool calls).
+        if run.status != "running" and run.status not in ("completed", "failed"):
+            if any(_pid_matches_run(a, run) for a in active_runs):
+                run.status = "running"
+
+        # Fix #2: gate-waiting runs are legitimately idle — no events are
+        # emitted between gate_presented and gate_resolved (the human may
+        # take hours/days to respond). Keep them marked running regardless
+        # of mtime so they stay visible in the Active Runs section.
+        if (
+            run.status not in ("running", "completed", "failed")
+            and run.gate_waiting
+        ):
+            run.status = "running"
+
+        # Fix #3: detect in-flight foreground runs. If the last parsed event
+        # is an agent_tool_start with no matching complete AND the process
+        # hasn't been declared terminal, treat it as running — but only for
+        # a short grace window. Backgrounded long-running runs are already
+        # kept alive via the PID-match check above, so this branch only
+        # affects foreground runs where the process may have died silently.
+        if (
+            run.status not in ("running", "completed", "failed")
+            and run.tool_in_flight
+            and run.last_event_ts
+            # 10 min: a real in-flight tool call rarely exceeds this.
+            # Beyond that, the harness almost certainly died without
+            # emitting a terminal event — mark as interrupted so it
+            # moves out of "Active Runs".
+            and (now - run.last_event_ts) < 600
+        ):
+            run.status = "running"
+
+        runs.append(run)
     return runs
 
 
@@ -500,6 +577,162 @@ def _load_active_runs() -> list[ActiveRun]:
 # ---------------------------------------------------------------------------
 # Aggregation helpers
 # ---------------------------------------------------------------------------
+def _detect_worktree(cwd: Path, cache: dict[str, dict]) -> dict:
+    """Return info about the git worktree covering *cwd*.
+
+    Uses a short-timeout git invocation. Results are cached in *cache*
+    (keyed by str(cwd)) so repeated calls within one dashboard refresh
+    don't re-shell-out.
+    """
+    key = str(cwd)
+    if key in cache:
+        return cache[key]
+    info: dict = {}
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=1.5,
+        )
+        if top.returncode != 0:
+            cache[key] = info
+            return info
+        toplevel = top.stdout.strip()
+        if not toplevel:
+            cache[key] = info
+            return info
+        br = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=1.5,
+        )
+        branch = br.stdout.strip() if br.returncode == 0 else ""
+        wl = subprocess.run(
+            ["git", "-C", str(cwd), "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=1.5,
+        )
+        main_wt = ""
+        if wl.returncode == 0:
+            for line in wl.stdout.splitlines():
+                if line.startswith("worktree "):
+                    main_wt = line[len("worktree "):].strip()
+                    break
+        is_worktree = False
+        try:
+            if main_wt:
+                is_worktree = Path(main_wt).resolve() != Path(toplevel).resolve()
+        except Exception:
+            is_worktree = False
+        info = {
+            "path": toplevel,
+            "name": Path(toplevel).name,
+            "is_worktree": is_worktree,
+            "branch": branch,
+        }
+    except Exception:
+        info = {}
+    cache[key] = info
+    return info
+
+
+def _aggregate_metrics(runs: list[WorkflowRun]) -> dict[str, Any]:
+    """Aggregate rich metrics across runs (server-side, all-time)."""
+    by_workflow: dict[str, dict] = {}
+    by_model: dict[str, dict] = {}
+    by_agent: dict[str, dict] = {}
+    error_types: dict[str, int] = {}
+    agent_failures: dict[str, int] = {}
+    total_cost = 0.0
+    total_tokens = 0
+    total_runs = 0
+    total_completed = 0
+    total_failed = 0
+    for r in runs:
+        total_runs += 1
+        total_cost += r.total_cost
+        total_tokens += r.total_tokens
+        if r.status == "completed":
+            total_completed += 1
+        elif r.status == "failed":
+            total_failed += 1
+            et = r.error_type or "Unknown"
+            error_types[et] = error_types.get(et, 0) + 1
+            if r.failed_agent:
+                agent_failures[r.failed_agent] = agent_failures.get(r.failed_agent, 0) + 1
+        w = by_workflow.setdefault(r.name or "(unknown)", {
+            "runs": 0, "completed": 0, "failed": 0,
+            "total_cost": 0.0, "total_tokens": 0, "_durations": [],
+        })
+        w["runs"] += 1
+        w["total_cost"] += r.total_cost
+        w["total_tokens"] += r.total_tokens
+        if r.status == "completed":
+            w["completed"] += 1
+        elif r.status == "failed":
+            w["failed"] += 1
+        if r.started_at and r.ended_at and r.ended_at > r.started_at:
+            w["_durations"].append(r.ended_at - r.started_at)
+        for a in r.agents:
+            if a.model:
+                m = by_model.setdefault(a.model, {"cost": 0.0, "tokens": 0, "invocations": 0})
+                m["cost"] += a.cost_usd
+                m["tokens"] += a.tokens
+                m["invocations"] += 1
+            if a.name:
+                ag = by_agent.setdefault(a.name, {
+                    "invocations": 0, "total_cost": 0.0,
+                    "total_tokens": 0, "_elapsed_sum": 0.0,
+                })
+                ag["invocations"] += 1
+                ag["total_cost"] += a.cost_usd
+                ag["total_tokens"] += a.tokens
+                ag["_elapsed_sum"] += a.elapsed
+    for w in by_workflow.values():
+        durs = w.pop("_durations")
+        w["avg_duration_sec"] = (sum(durs) / len(durs)) if durs else 0.0
+        w["success_rate"] = (w["completed"] / w["runs"]) if w["runs"] else 0.0
+    for ag in by_agent.values():
+        es = ag.pop("_elapsed_sum")
+        ag["avg_elapsed"] = (es / ag["invocations"]) if ag["invocations"] else 0.0
+    top_agents_by_cost = sorted(
+        [{"name": n, **v} for n, v in by_agent.items()],
+        key=lambda x: -x["total_cost"],
+    )[:10]
+    return {
+        "by_workflow": dict(sorted(by_workflow.items(), key=lambda x: -x[1]["total_cost"])),
+        "by_model": dict(sorted(by_model.items(), key=lambda x: -x[1]["cost"])),
+        "by_agent": dict(sorted(by_agent.items(), key=lambda x: -x[1]["total_cost"])),
+        "top_agents_by_cost": top_agents_by_cost,
+        "error_types": dict(sorted(error_types.items(), key=lambda x: -x[1])),
+        "agent_failures": dict(sorted(agent_failures.items(), key=lambda x: -x[1])),
+        "totals": {
+            "cost": total_cost, "tokens": total_tokens,
+            "runs": total_runs, "completed": total_completed, "failed": total_failed,
+        },
+    }
+
+
+def _run_to_raw(r: WorkflowRun) -> dict:
+    """Minimal run representation for client-side metrics recomputation."""
+    duration_sec = 0.0
+    if r.started_at and r.ended_at and r.ended_at > r.started_at:
+        duration_sec = r.ended_at - r.started_at
+    return {
+        "log_file": r.log_file,
+        "name": r.name,
+        "status": r.status,
+        "started_at": r.started_at,
+        "total_cost": r.total_cost,
+        "total_tokens": r.total_tokens,
+        "agents": [
+            {"name": a.name, "model": a.model, "tokens": a.tokens,
+             "cost_usd": a.cost_usd, "elapsed": a.elapsed}
+            for a in r.agents
+        ],
+        "failed_agent": r.failed_agent,
+        "error_type": r.error_type,
+        "duration_sec": duration_sec,
+    }
+
+
 def _aggregate_costs(runs: list[WorkflowRun]) -> dict[str, Any]:
     by_workflow: dict[str, float] = {}
     by_model: dict[str, float] = {}
@@ -727,6 +960,19 @@ a:hover { text-decoration: underline; }
     overflow: hidden;
 }
 .run-card.gate-waiting { border-left: 3px solid var(--yellow); }
+.run-card.abandoned { border-left: 3px solid var(--red); background: #1a1416; }
+.run-card.abandoned .wf-name { opacity: 0.75; }
+.run-card.abandoned .run-card-header { opacity: 0.85; }
+.abandoned-badge {
+    background: #f8514925;
+    color: var(--red);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    border: 1px solid #f8514950;
+}
 .run-card-header {
     padding: 12px 16px;
     cursor: pointer;
@@ -772,22 +1018,36 @@ a:hover { text-decoration: underline; }
 <h2>&#128260; Active Runs</h2>
 <div id="active-runs"></div>
 
+<h2 id="abandoned-heading" style="display:none">&#128123; Abandoned Runs <span id="abandoned-count" style="color:var(--text2);font-size:0.8rem;font-weight:normal"></span> <button id="toggle-abandoned" class="toggle-btn" title="Show or hide abandoned runs" onclick="toggleShowAbandoned()">Show</button></h2>
+<div id="abandoned-runs" style="display:none"></div>
+
 <h2>&#9989; Completed Runs <button id="toggle-reviewed-completed" class="toggle-btn" title="Show or hide runs you have already reviewed" onclick="toggleShowReviewedCompleted()">Show Reviewed</button></h2>
 <div id="completed-runs"></div>
 
 <h2>&#10060; Failed Runs <button id="toggle-reviewed-failed" class="toggle-btn" title="Show or hide failed runs you have already reviewed" onclick="toggleShowReviewedFailed()">Show Reviewed</button></h2>
 <div id="failed-runs"></div>
 
-<h2>&#128295; Checkpoint Recovery</h2>
-<div id="checkpoints"></div>
-
+<h2>&#128200; Metrics
+    <span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center;font-size:0.8rem;font-weight:normal">
+        <span style="color:var(--text2)">Range:</span>
+        <button class="toggle-btn metrics-range-btn" data-range="24h" onclick="setMetricsRange('24h')">24h</button>
+        <button class="toggle-btn metrics-range-btn" data-range="7d" onclick="setMetricsRange('7d')">7d</button>
+        <button class="toggle-btn metrics-range-btn" data-range="30d" onclick="setMetricsRange('30d')">30d</button>
+        <button class="toggle-btn metrics-range-btn" data-range="all" onclick="setMetricsRange('all')">All</button>
+    </span>
+</h2>
+<div id="metrics-totals" style="margin-bottom:12px"></div>
 <div class="grid">
-    <div><h2>&#128176; Cost by Workflow</h2><div id="cost-workflow"></div></div>
-    <div><h2>&#128176; Cost by Model</h2><div id="cost-model"></div></div>
+    <div><h3 style="font-size:0.9rem;color:var(--text2);margin-bottom:6px">By Workflow</h3><div id="metrics-by-workflow"></div></div>
+    <div><h3 style="font-size:0.9rem;color:var(--text2);margin-bottom:6px">By Model</h3><div id="metrics-by-model"></div></div>
 </div>
 <div class="grid">
-    <div><h2>&#9888;&#65039; Error Types</h2><div id="error-types"></div></div>
-    <div><h2>&#9888;&#65039; Agent Failures</h2><div id="agent-failures"></div></div>
+    <div><h3 style="font-size:0.9rem;color:var(--text2);margin-bottom:6px">By Agent</h3><div id="metrics-by-agent"></div></div>
+    <div><h3 style="font-size:0.9rem;color:var(--text2);margin-bottom:6px">Top Agents by Cost</h3><div id="metrics-top-agents"></div></div>
+</div>
+<div class="grid">
+    <div><h3 style="font-size:0.9rem;color:var(--text2);margin-bottom:6px">Error Types</h3><div id="metrics-error-types"></div></div>
+    <div><h3 style="font-size:0.9rem;color:var(--text2);margin-bottom:6px">Agent Failures</h3><div id="metrics-agent-failures"></div></div>
 </div>
 
 <script>
@@ -799,6 +1059,7 @@ let previousData = null;
 const reviewedRuns = new Set(JSON.parse(localStorage.getItem('conductor-reviewed-runs') || '[]'));
 let showReviewedCompleted = false;
 let showReviewedFailed = false;
+let showAbandoned = localStorage.getItem('conductor-show-abandoned') === '1';
 const expandedRuns = new Set();
 
 // ---------------------------------------------------------------------------
@@ -840,6 +1101,19 @@ function workItemHtml(r) {
     return '<span class="work-item">&#128203; '+typeSpan+idHtml+titleHtml+'</span>';
 }
 
+function worktreeBadge(r) {
+    var wt = r.worktree;
+    if (!wt || (!wt.branch && !wt.name)) return '';
+    // 📁 <worktree-dir-name> · 🌿 <branch>
+    // Linked worktrees get a distinct icon so they stand out from the primary checkout.
+    var dirIcon = wt.is_worktree ? '&#128230;' : '&#128193;'; // 📦 vs 📁
+    var parts = [];
+    if (wt.name) parts.push(dirIcon + ' ' + esc(wt.name));
+    if (wt.branch) parts.push('&#127807; ' + esc(wt.branch));
+    var sep = ' <span style="color:var(--border)">\u00b7</span> ';
+    return '<span class="worktree-badge" style="font-size:0.78rem;color:var(--text2);margin-left:6px">' + parts.join(sep) + '</span>';
+}
+
 // ---------------------------------------------------------------------------
 // Fetch
 // ---------------------------------------------------------------------------
@@ -866,9 +1140,9 @@ function renderStats(stats) {
         '<div class="stat"><div class="label">Failed</div><div class="value red">'+stats.failed+'</div></div>' +
         '<div class="stat"><div class="label">Active Now</div><div class="value yellow">'+stats.active+'</div></div>' +
         '<div class="stat"><div class="label">Gates Waiting</div><div class="value yellow">'+stats.gates_waiting+'</div></div>' +
+        '<div class="stat"><div class="label">Abandoned</div><div class="value red">'+(stats.abandoned||0)+'</div></div>' +
         '<div class="stat"><div class="label">Total Cost</div><div class="value">'+fmtCost2(stats.total_cost)+'</div></div>' +
-        '<div class="stat"><div class="label">Total Tokens</div><div class="value">'+fmtTokens(stats.total_tokens)+'</div></div>' +
-        '<div class="stat"><div class="label">Checkpoints</div><div class="value">'+stats.checkpoints+'</div></div>';
+        '<div class="stat"><div class="label">Total Tokens</div><div class="value">'+fmtTokens(stats.total_tokens)+'</div></div>';
 }
 
 // ---------------------------------------------------------------------------
@@ -882,15 +1156,29 @@ function renderActiveRuns(runs) {
     }
     var html = '';
     for (var i = 0; i < runs.length; i++) {
-        var r = runs[i];
-        var key = r.log_file || ('active-'+i);
+        html += renderRunCard(runs[i], i, 'active');
+    }
+    el.innerHTML = html;
+}
+
+function renderRunCard(r, i, keyPrefix) {
+        var key = r.log_file || (keyPrefix+'-'+i);
         var isExpanded = expandedRuns.has(key);
+        var isAbandoned = !r.process_alive;
         var gateClass = r.gate_waiting ? ' gate-waiting' : '';
+        if (isAbandoned) gateClass += ' abandoned';
 
         // Agent status line
         var agentStatus;
         if (r.gate_waiting) {
-            agentStatus = '<span class="gate-pulse">&#128678;</span> <span style="color:var(--yellow)">'+esc(r.gate_agent)+'</span> <span class="err-type" style="background:#d2992220">GATE WAITING</span>';
+            if (isAbandoned) {
+                agentStatus = '&#128123; <span style="color:var(--red)">'+esc(r.gate_agent)+'</span> <span class="abandoned-badge">GATE ABANDONED</span>';
+            } else {
+                agentStatus = '<span class="gate-pulse">&#128678;</span> <span style="color:var(--yellow)">'+esc(r.gate_agent)+'</span> <span class="err-type" style="background:#d2992220">GATE WAITING</span>';
+            }
+        } else if (isAbandoned) {
+            var atype = r.current_agent_type ? ' <span style="color:var(--text2)">('+esc(r.current_agent_type)+')</span>' : '';
+            agentStatus = '&#128123; '+esc(r.current_agent || '\\u2014')+atype+' <span class="abandoned-badge">ABANDONED</span>';
         } else if (r.current_agent) {
             var atype = r.current_agent_type ? ' <span style="color:var(--text2)">('+esc(r.current_agent_type)+')</span>' : '';
             agentStatus = '&#9881;&#65039; '+esc(r.current_agent)+atype;
@@ -899,9 +1187,10 @@ function renderActiveRuns(runs) {
         }
 
         var wiHtml = workItemHtml(r);
-        var wiBadge = wiHtml ? ' '+wiHtml : '';
+        var wtHtml = worktreeBadge(r);
+        var wiBadge = (wiHtml ? ' '+wiHtml : '') + wtHtml;
 
-        html += '<div class="run-card fade-in'+gateClass+'">';
+        var html = '<div class="run-card fade-in'+gateClass+'">';
         html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+jsEsc(key)+'\\') ">';
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
         html += '<span class="wf-name">'+esc(r.name)+'</span>'+wiBadge;
@@ -930,8 +1219,7 @@ function renderActiveRuns(runs) {
         }
         html += '<div style="margin-top:4px"><code class="replay-cmd">'+esc(r.replay_cmd)+'</code></div>';
         html += '</div></div>';
-    }
-    el.innerHTML = html;
+        return html;
 }
 
 // ---------------------------------------------------------------------------
@@ -963,7 +1251,8 @@ function renderCompletedRuns(runs) {
         var isExpanded = expandedRuns.has('completed-'+key);
         var reviewedClass = isReviewed ? ' reviewed' : '';
         var wiHtml = workItemHtml(r);
-        var nameExtra = wiHtml ? '<br>'+wiHtml : (r.purpose ? '<br><span style="color:var(--text2);font-size:0.75rem">'+esc(r.purpose)+'</span>' : '');
+        var wtHtml = worktreeBadge(r);
+        var nameExtra = wiHtml ? '<br>'+wiHtml+wtHtml : (r.purpose ? '<br><span style="color:var(--text2);font-size:0.75rem">'+esc(r.purpose)+'</span>'+wtHtml : wtHtml);
 
         html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand details" onclick="toggleExpand(\\'completed-'+jsEsc(key)+'\\') ">';
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
@@ -1025,7 +1314,8 @@ function renderFailedRuns(runs) {
         var isExpanded = expandedRuns.has('failed-'+key);
         var reviewedClass = isReviewed ? ' reviewed' : '';
         var wiHtml = workItemHtml(r);
-        var nameExtra = wiHtml ? '<br>'+wiHtml : '';
+        var wtHtml = worktreeBadge(r);
+        var nameExtra = (wiHtml ? '<br>'+wiHtml : '') + wtHtml;
         var errMsgShort = r.error_message ? (r.error_message.length > 80 ? esc(r.error_message.substring(0,80))+'\\u2026' : esc(r.error_message)) : '\\u2014';
 
         html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand error details" onclick="toggleExpand(\\'failed-'+jsEsc(key)+'\\') ">';
@@ -1054,100 +1344,200 @@ function renderFailedRuns(runs) {
 }
 
 // ---------------------------------------------------------------------------
-// Render: Checkpoints
+// Render: Metrics (with client-side time-range filtering)
 // ---------------------------------------------------------------------------
-function renderCheckpoints(checkpoints) {
-    var el = document.getElementById('checkpoints');
-    if (!checkpoints || checkpoints.length === 0) {
-        el.innerHTML = '<table><tbody><tr><td class="empty" colspan="6">No checkpoints</td></tr></tbody></table>';
-        return;
-    }
-    var html = '<table><thead><tr><th>Workflow</th><th>Created</th><th>Error Type</th><th>Failed Agent</th><th>Message</th><th>Resume Command</th></tr></thead><tbody>';
-    for (var i = 0; i < checkpoints.length; i++) {
-        var c = checkpoints[i];
-        var createdStr = c.created_at ? esc(c.created_at.substring(0,19)) : '\\u2014';
-        var msgShort = c.error_message ? (c.error_message.length > 80 ? esc(c.error_message.substring(0,80))+'\\u2026' : esc(c.error_message)) : '\\u2014';
-        html += '<tr class="fade-in">';
-        html += '<td>'+esc(c.workflow_name)+'</td>';
-        html += '<td>'+createdStr+'</td>';
-        html += '<td><span class="err-type">'+esc(c.error_type)+'</span></td>';
-        html += '<td>'+esc(c.failed_agent)+' (iter '+c.iteration+')</td>';
-        html += '<td title="'+esc(c.error_message)+'">'+msgShort+'</td>';
-        html += '<td><code class="replay-cmd">'+esc(c.resume_cmd)+'</code></td>';
-        html += '</tr>';
-    }
-    html += '</tbody></table>';
-    el.innerHTML = html;
+let metricsRange = localStorage.getItem('conductor-metrics-range') || 'all';
+
+function setMetricsRange(range) {
+    metricsRange = range;
+    localStorage.setItem('conductor-metrics-range', range);
+    renderMetrics();
 }
 
-// ---------------------------------------------------------------------------
-// Render: Costs
-// ---------------------------------------------------------------------------
-function renderCosts(costs) {
-    // Cost by Workflow
-    var wfEl = document.getElementById('cost-workflow');
-    var byWf = costs.by_workflow || {};
-    var wfKeys = Object.keys(byWf);
-    if (wfKeys.length === 0) {
-        wfEl.innerHTML = '<table><tbody><tr><td class="empty" colspan="2">No cost data</td></tr></tbody></table>';
-    } else {
-        var html = '<table><thead><tr><th>Workflow</th><th>Cost</th></tr></thead><tbody>';
-        for (var i = 0; i < wfKeys.length; i++) {
-            html += '<tr><td>'+esc(wfKeys[i])+'</td><td>$'+Number(byWf[wfKeys[i]]).toFixed(4)+'</td></tr>';
-        }
-        html += '</tbody></table>';
-        wfEl.innerHTML = html;
-    }
-
-    // Cost by Model
-    var mdEl = document.getElementById('cost-model');
-    var byModel = costs.by_model || {};
-    var mdKeys = Object.keys(byModel);
-    if (mdKeys.length === 0) {
-        mdEl.innerHTML = '<table><tbody><tr><td class="empty" colspan="2">No cost data</td></tr></tbody></table>';
-    } else {
-        var html = '<table><thead><tr><th>Model</th><th>Cost</th></tr></thead><tbody>';
-        for (var i = 0; i < mdKeys.length; i++) {
-            html += '<tr><td>'+esc(mdKeys[i])+'</td><td>$'+Number(byModel[mdKeys[i]]).toFixed(4)+'</td></tr>';
-        }
-        html += '</tbody></table>';
-        mdEl.innerHTML = html;
+function rangeCutoffSec(range) {
+    var now = Date.now() / 1000;
+    switch (range) {
+        case '24h': return now - 24*3600;
+        case '7d':  return now - 7*24*3600;
+        case '30d': return now - 30*24*3600;
+        default:    return 0;
     }
 }
 
-// ---------------------------------------------------------------------------
-// Render: Errors
-// ---------------------------------------------------------------------------
-function renderErrors(errors) {
-    // Error Types
-    var etEl = document.getElementById('error-types');
-    var errTypes = errors.error_types || {};
-    var etKeys = Object.keys(errTypes);
-    if (etKeys.length === 0) {
-        etEl.innerHTML = '<table><tbody><tr><td class="empty" colspan="2">No errors</td></tr></tbody></table>';
-    } else {
-        var html = '<table><thead><tr><th>Error Type</th><th>Count</th></tr></thead><tbody>';
-        for (var i = 0; i < etKeys.length; i++) {
-            html += '<tr><td>'+esc(etKeys[i])+'</td><td>'+errTypes[etKeys[i]]+'</td></tr>';
+function computeMetricsFromRuns(runs) {
+    var byWorkflow = {};
+    var byModel = {};
+    var byAgent = {};
+    var errorTypes = {};
+    var agentFailures = {};
+    var totalCost = 0, totalTokens = 0, totalRuns = 0, totalCompleted = 0, totalFailed = 0;
+    for (var i = 0; i < runs.length; i++) {
+        var r = runs[i];
+        totalRuns++;
+        totalCost += r.total_cost || 0;
+        totalTokens += r.total_tokens || 0;
+        if (r.status === 'completed') totalCompleted++;
+        else if (r.status === 'failed') {
+            totalFailed++;
+            var et = r.error_type || 'Unknown';
+            errorTypes[et] = (errorTypes[et] || 0) + 1;
+            if (r.failed_agent) agentFailures[r.failed_agent] = (agentFailures[r.failed_agent] || 0) + 1;
         }
-        html += '</tbody></table>';
-        etEl.innerHTML = html;
+        var wname = r.name || '(unknown)';
+        var w = byWorkflow[wname] || (byWorkflow[wname] = {
+            runs:0, completed:0, failed:0, total_cost:0, total_tokens:0, _durs:[]
+        });
+        w.runs++;
+        w.total_cost += r.total_cost || 0;
+        w.total_tokens += r.total_tokens || 0;
+        if (r.status === 'completed') w.completed++;
+        else if (r.status === 'failed') w.failed++;
+        if (r.duration_sec && r.duration_sec > 0) w._durs.push(r.duration_sec);
+        var agents = r.agents || [];
+        for (var j = 0; j < agents.length; j++) {
+            var a = agents[j];
+            if (a.model) {
+                var m = byModel[a.model] || (byModel[a.model] = {cost:0, tokens:0, invocations:0});
+                m.cost += a.cost_usd || 0;
+                m.tokens += a.tokens || 0;
+                m.invocations++;
+            }
+            if (a.name) {
+                var ag = byAgent[a.name] || (byAgent[a.name] = {
+                    invocations:0, total_cost:0, total_tokens:0, _elapsed:0
+                });
+                ag.invocations++;
+                ag.total_cost += a.cost_usd || 0;
+                ag.total_tokens += a.tokens || 0;
+                ag._elapsed += a.elapsed || 0;
+            }
+        }
     }
+    Object.keys(byWorkflow).forEach(function(k){
+        var w = byWorkflow[k];
+        w.avg_duration_sec = w._durs.length ? (w._durs.reduce(function(a,b){return a+b;},0)/w._durs.length) : 0;
+        w.success_rate = w.runs ? (w.completed / w.runs) : 0;
+        delete w._durs;
+    });
+    Object.keys(byAgent).forEach(function(k){
+        var ag = byAgent[k];
+        ag.avg_elapsed = ag.invocations ? (ag._elapsed / ag.invocations) : 0;
+        delete ag._elapsed;
+    });
+    var topAgents = Object.keys(byAgent).map(function(n){
+        return Object.assign({name:n}, byAgent[n]);
+    }).sort(function(a,b){return b.total_cost - a.total_cost;}).slice(0, 10);
+    return {
+        by_workflow: byWorkflow, by_model: byModel, by_agent: byAgent,
+        top_agents_by_cost: topAgents,
+        error_types: errorTypes, agent_failures: agentFailures,
+        totals: {cost: totalCost, tokens: totalTokens, runs: totalRuns,
+                 completed: totalCompleted, failed: totalFailed}
+    };
+}
 
-    // Agent Failures
-    var afEl = document.getElementById('agent-failures');
-    var agentFails = errors.agent_failures || {};
-    var afKeys = Object.keys(agentFails);
-    if (afKeys.length === 0) {
-        afEl.innerHTML = '<table><tbody><tr><td class="empty" colspan="2">No failures</td></tr></tbody></table>';
-    } else {
-        var html = '<table><thead><tr><th>Agent</th><th>Failures</th></tr></thead><tbody>';
-        for (var i = 0; i < afKeys.length; i++) {
-            html += '<tr><td>'+esc(afKeys[i])+'</td><td>'+agentFails[afKeys[i]]+'</td></tr>';
-        }
-        html += '</tbody></table>';
-        afEl.innerHTML = html;
+function fmtDuration(sec) {
+    if (!sec) return '\\u2014';
+    sec = Math.round(sec);
+    if (sec < 60) return sec + 's';
+    var m = Math.floor(sec/60), s = sec%60;
+    if (m < 60) return m + 'm ' + s + 's';
+    var h = Math.floor(m/60); m = m%60;
+    return h + 'h ' + m + 'm';
+}
+
+function tableFromRows(headers, rows, emptyMsg) {
+    if (!rows || rows.length === 0) {
+        return '<table><tbody><tr><td class="empty" colspan="'+headers.length+'">'+esc(emptyMsg||'No data')+'</td></tr></tbody></table>';
     }
+    var h = '<table><thead><tr>';
+    for (var i = 0; i < headers.length; i++) h += '<th>'+esc(headers[i])+'</th>';
+    h += '</tr></thead><tbody>';
+    for (var r = 0; r < rows.length; r++) {
+        h += '<tr>';
+        for (var c = 0; c < rows[r].length; c++) h += '<td>'+rows[r][c]+'</td>';
+        h += '</tr>';
+    }
+    h += '</tbody></table>';
+    return h;
+}
+
+function renderMetrics() {
+    // Update active state on range buttons
+    var btns = document.querySelectorAll('.metrics-range-btn');
+    for (var i = 0; i < btns.length; i++) {
+        var isActive = btns[i].getAttribute('data-range') === metricsRange;
+        btns[i].className = 'toggle-btn metrics-range-btn' + (isActive ? ' active' : '');
+    }
+    if (!dashboardData) return;
+    var raw = dashboardData.runs_raw || [];
+    var cutoff = rangeCutoffSec(metricsRange);
+    var filtered = cutoff > 0 ? raw.filter(function(r){ return (r.started_at || 0) >= cutoff; }) : raw;
+    var m = computeMetricsFromRuns(filtered);
+
+    // Totals
+    var t = m.totals;
+    var totalsHtml =
+        '<div class="stats" style="margin-bottom:0">' +
+        '<div class="stat"><div class="label">Runs</div><div class="value blue">'+t.runs+'</div></div>' +
+        '<div class="stat"><div class="label">Completed</div><div class="value green">'+t.completed+'</div></div>' +
+        '<div class="stat"><div class="label">Failed</div><div class="value red">'+t.failed+'</div></div>' +
+        '<div class="stat"><div class="label">Cost</div><div class="value">'+fmtCost2(t.cost)+'</div></div>' +
+        '<div class="stat"><div class="label">Tokens</div><div class="value">'+fmtTokens(t.tokens)+'</div></div>' +
+        '</div>';
+    document.getElementById('metrics-totals').innerHTML = totalsHtml;
+
+    // By Workflow
+    var wfRows = Object.keys(m.by_workflow).map(function(name){
+        var w = m.by_workflow[name];
+        return [
+            esc(name), w.runs, w.completed, w.failed,
+            (w.success_rate*100).toFixed(0)+'%',
+            fmtDuration(w.avg_duration_sec),
+            '$'+Number(w.total_cost).toFixed(4),
+            fmtTokens(w.total_tokens),
+        ];
+    });
+    document.getElementById('metrics-by-workflow').innerHTML = tableFromRows(
+        ['Workflow','Runs','OK','Fail','Success','Avg Dur','Cost','Tokens'], wfRows, 'No runs in range');
+
+    // By Model
+    var mdRows = Object.keys(m.by_model).map(function(name){
+        var x = m.by_model[name];
+        return [esc(name), '$'+Number(x.cost).toFixed(4), fmtTokens(x.tokens), x.invocations];
+    });
+    document.getElementById('metrics-by-model').innerHTML = tableFromRows(
+        ['Model','Cost','Tokens','Invocations'], mdRows, 'No model data');
+
+    // By Agent
+    var agRows = Object.keys(m.by_agent).map(function(name){
+        var x = m.by_agent[name];
+        return [esc(name), x.invocations, '$'+Number(x.total_cost).toFixed(4),
+                fmtTokens(x.total_tokens), fmtDuration(x.avg_elapsed)];
+    });
+    document.getElementById('metrics-by-agent').innerHTML = tableFromRows(
+        ['Agent','Invocations','Cost','Tokens','Avg Elapsed'], agRows, 'No agent data');
+
+    // Top agents by cost
+    var topRows = m.top_agents_by_cost.map(function(x){
+        return [esc(x.name), '$'+Number(x.total_cost).toFixed(4), x.invocations, fmtTokens(x.total_tokens)];
+    });
+    document.getElementById('metrics-top-agents').innerHTML = tableFromRows(
+        ['Agent','Cost','Invocations','Tokens'], topRows, 'No agent data');
+
+    // Error types
+    var etRows = Object.keys(m.error_types).map(function(name){
+        return ['<span class="err-type">'+esc(name)+'</span>', m.error_types[name]];
+    });
+    document.getElementById('metrics-error-types').innerHTML = tableFromRows(
+        ['Error Type','Count'], etRows, 'No errors in range');
+
+    // Agent failures
+    var afRows = Object.keys(m.agent_failures).map(function(name){
+        return [esc(name), m.agent_failures[name]];
+    });
+    document.getElementById('metrics-agent-failures').innerHTML = tableFromRows(
+        ['Agent','Failures'], afRows, 'No failures in range');
 }
 
 // ---------------------------------------------------------------------------
@@ -1157,11 +1547,41 @@ function renderAll() {
     if (!dashboardData) return;
     renderStats(dashboardData.stats);
     renderActiveRuns(dashboardData.active_runs);
+    renderAbandonedRuns(dashboardData.abandoned_runs || []);
     renderCompletedRuns(dashboardData.completed_runs);
     renderFailedRuns(dashboardData.failed_runs);
-    renderCheckpoints(dashboardData.checkpoints);
-    renderCosts(dashboardData.costs);
-    renderErrors(dashboardData.errors);
+    renderMetrics();
+}
+
+function renderAbandonedRuns(runs) {
+    const heading = document.getElementById('abandoned-heading');
+    const container = document.getElementById('abandoned-runs');
+    const countSpan = document.getElementById('abandoned-count');
+    const toggleBtn = document.getElementById('toggle-abandoned');
+    if (!runs.length) {
+        heading.style.display = 'none';
+        container.style.display = 'none';
+        return;
+    }
+    heading.style.display = '';
+    countSpan.textContent = '(' + runs.length + ')';
+    toggleBtn.textContent = showAbandoned ? 'Hide' : 'Show';
+    if (!showAbandoned) {
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = '';
+    var html = '';
+    for (var i = 0; i < runs.length; i++) {
+        html += renderRunCard(runs[i], i, 'abandoned');
+    }
+    container.innerHTML = html;
+}
+
+function toggleShowAbandoned() {
+    showAbandoned = !showAbandoned;
+    localStorage.setItem('conductor-show-abandoned', showAbandoned ? '1' : '0');
+    renderAbandonedRuns(dashboardData.abandoned_runs || []);
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,12 +1609,38 @@ async function actionInvestigate(logFile) {
 
 async function actionRestart(logFile) {
     try {
-        await fetch('/api/action/restart', {
+        const res = await fetch('/api/action/restart', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({log_file: logFile})
         });
-    } catch (e) { console.error('Restart action failed:', e); }
+        const data = await res.json().catch(() => ({}));
+        if (data && data.status === 'started') {
+            toast('\\u{1F504} Restart launched (detached)\\n' + (data.workflow || '') + '\\ncwd: ' + (data.cwd || '') + (data.stderr_log ? '\\nlog: ' + data.stderr_log : ''), 'ok');
+        } else {
+            toast('\\u26A0\\uFE0F Restart failed: ' + (data.error || 'unknown error'), 'err');
+        }
+    } catch (e) {
+        console.error('Restart action failed:', e);
+        toast('\\u26A0\\uFE0F Restart request failed: ' + e, 'err');
+    }
+}
+
+function toast(msg, kind) {
+    let el = document.getElementById('toast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'toast';
+        el.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:12px 18px;border-radius:6px;font-size:0.95rem;white-space:pre-line;z-index:9999;max-width:480px;box-shadow:0 4px 12px rgba(0,0,0,0.4);transition:opacity 0.3s';
+        document.body.appendChild(el);
+    }
+    el.style.background = (kind === 'err') ? '#5a1f1f' : '#1f3d1f';
+    el.style.border = (kind === 'err') ? '1px solid var(--red)' : '1px solid var(--green)';
+    el.style.color = 'var(--text)';
+    el.textContent = msg;
+    el.style.opacity = '1';
+    clearTimeout(window.__toastTimer);
+    window.__toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 6000);
 }
 
 // ---------------------------------------------------------------------------
@@ -1290,8 +1736,14 @@ async def api_dashboard():
     return await loop.run_in_executor(None, _compute_dashboard)
 
 
-def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int]) -> dict:
+def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
+                   worktree_cache: dict[str, dict] | None = None,
+                   alive_pid_runs: list["ActiveRun"] | None = None) -> dict:
     """Convert a WorkflowRun to a JSON-serializable dict."""
+    if worktree_cache is None:
+        worktree_cache = {}
+    if alive_pid_runs is None:
+        alive_pid_runs = []
     # Find matching dashboard port
     dashboard_port = ts_to_port.get(r.started_at)
     if not dashboard_port:
@@ -1299,6 +1751,19 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int]) -> dict:
             if abs(ts - r.started_at) < 2.0:
                 dashboard_port = port
                 break
+
+    # Determine whether the backing conductor process is actually alive.
+    # A run is "alive" if either:
+    #   (a) its per-run dashboard port is currently listening (ts_to_port hit), OR
+    #   (b) a registered PID file matches (backgrounded --web-bg runs), OR
+    #   (c) the dashboard parser force-marked it running via the tool_in_flight
+    #       grace window (foreground run still producing events).
+    process_alive = bool(dashboard_port) or any(
+        _pid_matches_run(a, r) for a in alive_pid_runs
+    )
+    if not process_alive and r.tool_in_flight and r.last_event_ts:
+        if (time.time() - r.last_event_ts) < 600:
+            process_alive = True
 
     # Build work item URL
     work_item_url = ""
@@ -1313,6 +1778,8 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int]) -> dict:
     cwd = _resolve_workflow_dir(r.log_file, wf_name)
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
     review_available = skill_path.exists()
+
+    worktree = _detect_worktree(cwd, worktree_cache)
 
     return {
         "log_file": r.log_file,
@@ -1349,10 +1816,12 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int]) -> dict:
         "work_item_url": work_item_url,
         "dashboard_port": dashboard_port,
         "dashboard_url": f"http://localhost:{dashboard_port}" if dashboard_port else "",
-        "replay_cmd": f'conductor replay "{r.log_file}"',
+        "replay_cmd": f'conductor replay "{r.log_file}" --web-bg',
         "review_available": review_available,
         "review_skill_path": str(skill_path),
         "cwd": str(cwd),
+        "worktree": worktree,
+        "process_alive": process_alive,
     }
 
 
@@ -1361,20 +1830,30 @@ def _compute_dashboard() -> dict:
     checkpoints = _load_checkpoints()
     costs = _aggregate_costs(runs)
     errors = _aggregate_errors(runs)
+    metrics = _aggregate_metrics(runs)
     ts_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
+    worktree_cache: dict[str, dict] = {}
+    alive_pid_runs = [a for a in _load_active_runs() if a.alive]
 
     sorted_runs = sorted(runs, key=lambda r: r.started_at or 0, reverse=True)
 
-    active_runs = [_serialize_run(r, ts_to_port) for r in sorted_runs if r.status == "running"]
-    completed_runs = [_serialize_run(r, ts_to_port) for r in sorted_runs if r.status == "completed"]
-    failed_runs = [_serialize_run(r, ts_to_port) for r in sorted_runs if r.status == "failed"]
-    other_runs = [_serialize_run(r, ts_to_port) for r in sorted_runs
+    all_running = [_serialize_run(r, ts_to_port, worktree_cache, alive_pid_runs) for r in sorted_runs if r.status == "running"]
+    # Split out abandoned (process dead) runs into their own section so they
+    # don't clutter Active Runs. Includes dead gate-waiting runs and any
+    # dead foreground runs that got stuck with tool_in_flight.
+    active_runs = [r for r in all_running if r["process_alive"]]
+    abandoned_runs = [r for r in all_running if not r["process_alive"]]
+    completed_runs = [_serialize_run(r, ts_to_port, worktree_cache, alive_pid_runs) for r in sorted_runs if r.status == "completed"]
+    failed_runs = [_serialize_run(r, ts_to_port, worktree_cache, alive_pid_runs) for r in sorted_runs if r.status == "failed"]
+    other_runs = [_serialize_run(r, ts_to_port, worktree_cache, alive_pid_runs) for r in sorted_runs
                   if r.status not in ("running", "completed", "failed")]
 
-    gates_waiting = sum(1 for r in runs if r.gate_waiting and r.status == "running")
+    gates_waiting = sum(1 for r in active_runs if r["gate_waiting"])
+    gates_abandoned = sum(1 for r in abandoned_runs if r["gate_waiting"])
 
     return {
         "active_runs": active_runs,
+        "abandoned_runs": abandoned_runs,
         "completed_runs": completed_runs,
         "failed_runs": failed_runs,
         "other_runs": other_runs,
@@ -1384,26 +1863,16 @@ def _compute_dashboard() -> dict:
             "failed": len(failed_runs),
             "active": len(active_runs),
             "gates_waiting": gates_waiting,
+            "gates_abandoned": gates_abandoned,
+            "abandoned": len(abandoned_runs),
             "total_cost": costs["total"],
             "total_tokens": costs["total_tokens"],
             "checkpoints": len(checkpoints),
         },
         "costs": costs,
         "errors": errors,
-        "checkpoints": [
-            {
-                "file": c.file,
-                "workflow_name": c.workflow_name,
-                "workflow_path": c.workflow_path,
-                "created_at": c.created_at,
-                "error_type": c.error_type,
-                "error_message": c.error_message,
-                "failed_agent": c.failed_agent,
-                "iteration": c.iteration,
-                "resume_cmd": f'conductor resume "{c.file}"',
-            }
-            for c in sorted(checkpoints, key=lambda c: c.created_at or "", reverse=True)
-        ],
+        "metrics": metrics,
+        "runs_raw": [_run_to_raw(r) for r in sorted_runs],
     }
 
 
@@ -1441,23 +1910,86 @@ async def action_investigate(request: Request):
 
 @app.post("/api/action/restart")
 async def action_restart(request: Request):
-    """Restart a conductor workflow."""
+    """Restart a conductor workflow as a fully detached process.
+
+    Windows' ``--web-bg`` flag does not actually daemonize — it only arms an
+    auto-shutdown grace timer on client disconnect. The conductor child
+    therefore stays in the spawning process's tree, and any attempt to show
+    a visible terminal (wt.exe tab, cmd /k, etc.) ends up killing conductor
+    mid-turn when the user closes the window. To survive, we must use
+    ``DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP``
+    with stdout/stderr redirected to a log file. Progress visibility comes
+    from the dashboard itself polling the conductor event log.
+    """
     body = await request.json()
     log_file = body.get("log_file", "")
     if not log_file:
         return {"error": "log_file required"}, 400
-    workflow_path = _extract_workflow_path(log_file)
-    if not workflow_path:
-        return {"error": "Could not determine workflow path from log file"}
     wf_name = _extract_workflow_name(log_file)
     cwd = _resolve_workflow_dir(log_file, wf_name)
+    workflow_path = _extract_workflow_path(log_file)
+    # The workflow_started event stores the inline YAML source but not the
+    # path on disk. If we only got the name back, search the resolved cwd and
+    # common workflow folders for a matching YAML so we can pass a real file.
+    resolved_path = _find_workflow_yaml(workflow_path or wf_name, cwd)
+    if not resolved_path:
+        return {"error": f"Could not locate YAML for workflow '{wf_name}' under {cwd}. Re-run manually with the explicit path."}
+    workflow_path = str(resolved_path)
+
+    # Invoke conductor via ``pythonw.exe -m conductor``. The pip-generated
+    # ``conductor.exe`` wrapper re-spawns python.exe internally without
+    # propagating our DETACHED_PROCESS flag, which pops a console window.
+    # Going through pythonw (the GUI variant, which never allocates a
+    # console) avoids that entirely.
+    py_exe = Path(sys.executable)
+    pythonw = py_exe.with_name("pythonw.exe")
+    if pythonw.exists():
+        cmd = [str(pythonw), "-m", "conductor", "run", str(workflow_path), "--web-bg"]
+    else:
+        cmd = [str(py_exe), "-m", "conductor", "run", str(workflow_path), "--web-bg"]
+
+    # Capture stdout/stderr to a sidecar file so crash output isn't lost when
+    # we detach. The dashboard shows progress via the event log; this file is
+    # only needed when something goes wrong during startup.
+    log_dir = Path(tempfile.gettempdir()) / "conductor"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stderr_path = log_dir / f"restart-{wf_name}-{stamp}.log"
+
+    # Launch fully detached from the dashboard's process tree. Without these
+    # flags the conductor child is a descendant of cmd.exe / our Python
+    # process, and closing the spawning terminal (or killing the dashboard)
+    # propagates SIGTERM to conductor — killing it mid-turn. Note that
+    # ``--web-bg`` on Windows does NOT daemonize; it only arms an auto-
+    # shutdown grace timer for client disconnects.
+    DETACHED_PROCESS = 0x00000008
+    CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+    flags = (
+        subprocess.CREATE_NEW_PROCESS_GROUP
+        | DETACHED_PROCESS
+        | CREATE_BREAKAWAY_FROM_JOB
+    )
+
     try:
+        log_fh = open(stderr_path, "w", encoding="utf-8")
         subprocess.Popen(
-            ["conductor", "run", workflow_path, "--web-bg"],
+            cmd,
             cwd=str(cwd),
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
+            creationflags=flags,
+            stdin=subprocess.DEVNULL,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
         )
-        return {"status": "started", "workflow": workflow_path, "cwd": str(cwd)}
+        # We deliberately do not close log_fh here — the child inherits the
+        # handle and will close it on exit. Python GC will drop our reference
+        # shortly; the OS keeps the file open via the inherited descriptor.
+        return {
+            "status": "started",
+            "workflow": str(workflow_path),
+            "cwd": str(cwd),
+            "stderr_log": str(stderr_path),
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -1470,12 +2002,17 @@ def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
       2. Fall back to the static WORKFLOW_DIRS mapping.
       3. Fall back to HOME.
     """
-    # 1. Dynamic: inspect the first tool calls for file path arguments
+    # 1. Dynamic: inspect the first tool calls for file path arguments.
+    # Conductor stores `arguments` as either a dict OR a Python-repr string
+    # (e.g. "{'command': 'cd C:\\\\Users\\\\...\\\\projects\\\\twig2-1643'}"),
+    # so we scan both forms by stringifying when needed.
+    path_re = re.compile(r"([A-Za-z]:[\\/]+(?:[^\"'\s\\/]+[\\/]+)*projects[\\/]+[^\"'\s\\/]+)")
+    best_candidate: Path | None = None
     try:
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             checked = 0
             for line in f:
-                if checked > 200:  # only scan first 200 lines
+                if checked > 400:  # scan enough lines to get past setup events
                     break
                 checked += 1
                 line = line.strip()
@@ -1483,20 +2020,39 @@ def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
                     continue
                 try:
                     evt = json.loads(line)
-                    if evt.get("type") == "agent_tool_start":
-                        args = evt.get("data", {}).get("arguments", {})
-                        if isinstance(args, dict):
-                            for v in args.values():
-                                if isinstance(v, str):
-                                    m = re.search(r"([A-Za-z]:[/\\][^\"'\s]*[/\\]projects[/\\][^/\\\"'\s]+)", v)
-                                    if m:
-                                        candidate = Path(m.group(1).replace("/", os.sep))
-                                        if candidate.exists():
-                                            return candidate
-                except (json.JSONDecodeError, KeyError):
+                except json.JSONDecodeError:
                     continue
+                if evt.get("type") not in ("agent_tool_start", "agent_tool_complete"):
+                    continue
+                args = evt.get("data", {}).get("arguments", {})
+                # Normalize to a single string blob to search.
+                if isinstance(args, dict):
+                    blob = " ".join(str(v) for v in args.values() if isinstance(v, (str, int, float)))
+                elif isinstance(args, str):
+                    blob = args
+                else:
+                    continue
+                for m in path_re.finditer(blob):
+                    raw = m.group(1).rstrip(".,;:)]}>\"'")
+                    # Normalize backslashes (possibly doubled by repr) and forward slashes.
+                    normalized = raw.replace("\\\\", "\\").replace("/", os.sep)
+                    candidate = Path(normalized)
+                    # Windows strips trailing dots from paths at the filesystem layer,
+                    # so re-verify by comparing the stripped name to the resolved name.
+                    if not candidate.exists() or not candidate.is_dir():
+                        continue
+                    try:
+                        if candidate.resolve().name != candidate.name:
+                            continue
+                    except OSError:
+                        continue
+                    # Prefer the deepest / most specific match seen so far.
+                    if best_candidate is None or len(str(candidate)) > len(str(best_candidate)):
+                        best_candidate = candidate
     except Exception:
         pass
+    if best_candidate is not None:
+        return best_candidate
 
     # 2. Static mapping fallback
     for prefix, directory in WORKFLOW_DIRS.items():
@@ -1567,6 +2123,60 @@ def _spawn_terminal_with_copilot(prompt: str, cwd: Path | None = None) -> dict:
             return {"status": "launched", "method": "pwsh", "cwd": cwd_str}
         except Exception as e:
             return {"error": str(e)}
+
+
+def _find_workflow_yaml(name_or_path: str, cwd: Path) -> Path | None:
+    """Locate a workflow YAML file by name under cwd or common locations.
+
+    Conductor event logs store only the workflow name (not its source path),
+    so to re-run we have to find a matching .yaml/.yml on disk.
+
+    Search order:
+      1. If ``name_or_path`` already points to an existing file, use it.
+      2. Look under ``cwd`` for ``.conductor/<name>.yaml`` (and .yml).
+      3. Look for ``<name>.yaml`` anywhere under ``cwd`` (capped at ~6 levels).
+      4. Scan a few well-known global locations.
+    """
+    # 1. Already a path?
+    candidate = Path(name_or_path)
+    if candidate.exists() and candidate.is_file():
+        return candidate.resolve()
+
+    name = Path(name_or_path).stem  # strip any extension
+    exts = (".yaml", ".yml")
+    filenames = [name + ext for ext in exts]
+
+    # 2. .conductor folder in cwd (common convention).
+    for fn in filenames:
+        p = cwd / ".conductor" / fn
+        if p.is_file():
+            return p.resolve()
+        p = cwd / "conductor" / fn
+        if p.is_file():
+            return p.resolve()
+
+    # 3. Shallow recursive search under cwd (avoid exploding on big repos).
+    try:
+        for fn in filenames:
+            for hit in cwd.rglob(fn):
+                try:
+                    rel = hit.relative_to(cwd)
+                    if len(rel.parts) <= 6:
+                        return hit.resolve()
+                except ValueError:
+                    continue
+    except Exception:
+        pass
+
+    # 4. Well-known global locations.
+    home = Path.home()
+    for base in [home / ".conductor" / "workflows", home / ".copilot" / "conductor" / "workflows"]:
+        for fn in filenames:
+            p = base / fn
+            if p.is_file():
+                return p.resolve()
+
+    return None
 
 
 def _extract_workflow_path(log_file: str) -> str:
