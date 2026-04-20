@@ -672,10 +672,13 @@ def _aggregate_metrics(runs: list[WorkflowRun]) -> dict[str, Any]:
         if r.started_at and r.ended_at and r.ended_at > r.started_at:
             w["_durations"].append(r.ended_at - r.started_at)
         for a in r.agents:
+            a_cost = a.cost_usd or 0.0
+            a_tokens = a.tokens or 0
+            a_elapsed = a.elapsed or 0.0
             if a.model:
                 m = by_model.setdefault(a.model, {"cost": 0.0, "tokens": 0, "invocations": 0})
-                m["cost"] += a.cost_usd
-                m["tokens"] += a.tokens
+                m["cost"] += a_cost
+                m["tokens"] += a_tokens
                 m["invocations"] += 1
             if a.name:
                 ag = by_agent.setdefault(a.name, {
@@ -683,9 +686,9 @@ def _aggregate_metrics(runs: list[WorkflowRun]) -> dict[str, Any]:
                     "total_tokens": 0, "_elapsed_sum": 0.0,
                 })
                 ag["invocations"] += 1
-                ag["total_cost"] += a.cost_usd
-                ag["total_tokens"] += a.tokens
-                ag["_elapsed_sum"] += a.elapsed
+                ag["total_cost"] += a_cost
+                ag["total_tokens"] += a_tokens
+                ag["_elapsed_sum"] += a_elapsed
     for w in by_workflow.values():
         durs = w.pop("_durations")
         w["avg_duration_sec"] = (sum(durs) / len(durs)) if durs else 0.0
