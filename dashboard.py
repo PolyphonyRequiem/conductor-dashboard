@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import socket
 import sys
@@ -817,6 +818,114 @@ WORKFLOW_DIRS: dict[str, Path] = {
     "cloudvault": Path.home() / "projects" / "cloudvault-service-api",
 }
 
+# Twig SQLite DB paths keyed by workflow name prefix.
+TWIG_DB_PATHS: dict[str, Path] = {
+    "twig": Path.home() / ".twig" / "https___dev.azure.com_dangreen-msft" / "Twig" / "twig.db",
+}
+
+# Ordered hierarchy levels for deterministic display.
+_HIERARCHY_LEVELS = ["Epic", "Feature", "Issue", "Task"]
+
+# Cache: work_item_id -> (timestamp, result)
+_hierarchy_cache: dict[int, tuple[float, dict | None]] = {}
+_HIERARCHY_TTL = 15  # seconds
+
+
+def _load_twig_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
+    """Load work item hierarchy status from the twig SQLite DB.
+
+    Returns a dict like:
+        {
+            "focus": {"id": 1782, "type": "Issue", "state": "Done", "title": "..."},
+            "levels": [
+                {"type": "Task", "To Do": 1, "Doing": 2, "Done": 5, "total": 8}
+            ]
+        }
+    Returns None if the DB is unavailable or the item doesn't exist.
+    """
+    try:
+        wid = int(work_item_id)
+    except (ValueError, TypeError):
+        return None
+
+    now = time.time()
+    cached = _hierarchy_cache.get(wid)
+    if cached and (now - cached[0]) < _HIERARCHY_TTL:
+        return cached[1]
+
+    if not db_path.exists():
+        _hierarchy_cache[wid] = (now, None)
+        return None
+
+    result = None
+    try:
+        uri = f"file:{db_path}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=0.5)
+        conn.execute("PRAGMA journal_mode")  # ensure connection is live
+        cur = conn.cursor()
+
+        # Focus item
+        row = cur.execute(
+            "SELECT id, type, title, state FROM work_items WHERE id = ?", (wid,)
+        ).fetchone()
+        if not row:
+            conn.close()
+            _hierarchy_cache[wid] = (now, None)
+            return None
+
+        focus = {"id": row[0], "type": row[1], "title": row[2], "state": row[3]}
+
+        # Descendant breakdown by type and state using recursive CTE
+        rows = cur.execute("""
+            WITH RECURSIVE descendants AS (
+                SELECT id, type, state FROM work_items WHERE parent_id = ?
+                UNION ALL
+                SELECT w.id, w.type, w.state FROM work_items w
+                JOIN descendants d ON w.parent_id = d.id
+            )
+            SELECT type, state, COUNT(*) FROM descendants GROUP BY type, state
+        """, (wid,)).fetchall()
+        conn.close()
+
+        # Build levels dict: {type: {state: count}}
+        level_map: dict[str, dict[str, int]] = {}
+        for typ, state, cnt in rows:
+            if typ not in level_map:
+                level_map[typ] = {}
+            level_map[typ][state] = cnt
+
+        # Convert to ordered list
+        levels = []
+        for lvl in _HIERARCHY_LEVELS:
+            if lvl in level_map:
+                counts = level_map[lvl]
+                total = sum(counts.values())
+                levels.append({
+                    "type": lvl,
+                    "To Do": counts.get("To Do", 0),
+                    "Doing": counts.get("Doing", 0),
+                    "Done": counts.get("Done", 0),
+                    "total": total,
+                })
+        # Include any types not in the standard list
+        for lvl, counts in level_map.items():
+            if lvl not in _HIERARCHY_LEVELS:
+                total = sum(counts.values())
+                levels.append({
+                    "type": lvl,
+                    "To Do": counts.get("To Do", 0),
+                    "Doing": counts.get("Doing", 0),
+                    "Done": counts.get("Done", 0),
+                    "total": total,
+                })
+
+        result = {"focus": focus, "levels": levels}
+    except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError):
+        result = None
+
+    _hierarchy_cache[wid] = (now, result)
+    return result
+
 
 def _work_item_html(run: WorkflowRun, font_size: str = "0.85rem") -> str:
     """Build HTML snippet for a work item link, or empty string if none."""
@@ -1000,6 +1109,24 @@ a:hover { text-decoration: underline; }
 /* Work item badge */
 .work-item { font-size: 0.82rem; }
 
+/* Hierarchy status breakdown */
+.hierarchy { display: inline-flex; align-items: center; gap: 10px; font-size: 0.78rem; margin-left: 8px; }
+.hierarchy-level { display: inline-flex; align-items: center; gap: 3px; }
+.hierarchy-label { color: var(--text2); font-weight: 500; }
+.hierarchy-bar { display: inline-flex; height: 10px; border-radius: 3px; overflow: hidden; min-width: 40px; }
+.hierarchy-bar .seg { height: 100%; min-width: 2px; }
+.seg-done { background: var(--green); }
+.seg-doing { background: var(--yellow); }
+.seg-todo { background: #30363d; }
+.hierarchy-counts { color: var(--text2); white-space: nowrap; }
+.hierarchy-counts .done-ct { color: var(--green); }
+.hierarchy-counts .doing-ct { color: var(--yellow); }
+.hierarchy-counts .todo-ct { color: var(--text2); }
+.hierarchy-focus { color: var(--text2); font-size: 0.78rem; }
+.hierarchy-focus .state-done { color: var(--green); }
+.hierarchy-focus .state-doing { color: var(--yellow); }
+.hierarchy-focus .state-todo { color: var(--text2); }
+
 /* Reviewed row */
 .reviewed { opacity: 0.45; }
 
@@ -1101,6 +1228,35 @@ function workItemHtml(r) {
     return '<span class="work-item">&#128203; '+typeSpan+idHtml+titleHtml+'</span>';
 }
 
+function hierarchyHtml(r) {
+    var h = r.hierarchy;
+    if (!h || !h.levels || h.levels.length === 0) return '';
+    var html = '<span class="hierarchy">';
+    for (var i = 0; i < h.levels.length; i++) {
+        var lv = h.levels[i];
+        var total = lv.total || 1;
+        var donePct = Math.round((lv.Done / total) * 100);
+        var doingPct = Math.round((lv.Doing / total) * 100);
+        var todoPct = 100 - donePct - doingPct;
+        html += '<span class="hierarchy-level">';
+        html += '<span class="hierarchy-label">'+esc(lv.type)+':</span>';
+        html += '<span class="hierarchy-bar" title="'+lv.Done+' Done, '+lv.Doing+' Doing, '+(lv['To Do'])+' To Do">';
+        if (lv.Done > 0) html += '<span class="seg seg-done" style="width:'+donePct+'%"></span>';
+        if (lv.Doing > 0) html += '<span class="seg seg-doing" style="width:'+doingPct+'%"></span>';
+        if (lv['To Do'] > 0) html += '<span class="seg seg-todo" style="width:'+todoPct+'%"></span>';
+        html += '</span>';
+        html += '<span class="hierarchy-counts">';
+        var parts = [];
+        if (lv.Done > 0) parts.push('<span class="done-ct">'+lv.Done+'\\u2714</span>');
+        if (lv.Doing > 0) parts.push('<span class="doing-ct">'+lv.Doing+'\\u2699</span>');
+        if (lv['To Do'] > 0) parts.push('<span class="todo-ct">'+lv['To Do']+'\\u25cb</span>');
+        html += parts.join(' ');
+        html += '</span></span>';
+    }
+    html += '</span>';
+    return html;
+}
+
 function worktreeBadge(r) {
     var wt = r.worktree;
     if (!wt || (!wt.branch && !wt.name)) return '';
@@ -1188,7 +1344,8 @@ function renderRunCard(r, i, keyPrefix) {
 
         var wiHtml = workItemHtml(r);
         var wtHtml = worktreeBadge(r);
-        var wiBadge = (wiHtml ? ' '+wiHtml : '') + wtHtml;
+        var hiHtml = hierarchyHtml(r);
+        var wiBadge = (wiHtml ? ' '+wiHtml : '') + wtHtml + hiHtml;
 
         var html = '<div class="run-card fade-in'+gateClass+'">';
         html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+jsEsc(key)+'\\') ">';
@@ -1252,7 +1409,8 @@ function renderCompletedRuns(runs) {
         var reviewedClass = isReviewed ? ' reviewed' : '';
         var wiHtml = workItemHtml(r);
         var wtHtml = worktreeBadge(r);
-        var nameExtra = wiHtml ? '<br>'+wiHtml+wtHtml : (r.purpose ? '<br><span style="color:var(--text2);font-size:0.75rem">'+esc(r.purpose)+'</span>'+wtHtml : wtHtml);
+        var hiHtml = hierarchyHtml(r);
+        var nameExtra = wiHtml ? '<br>'+wiHtml+wtHtml+hiHtml : (r.purpose ? '<br><span style="color:var(--text2);font-size:0.75rem">'+esc(r.purpose)+'</span>'+wtHtml+hiHtml : wtHtml+hiHtml);
 
         html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand details" onclick="toggleExpand(\\'completed-'+jsEsc(key)+'\\') ">';
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
@@ -1315,7 +1473,8 @@ function renderFailedRuns(runs) {
         var reviewedClass = isReviewed ? ' reviewed' : '';
         var wiHtml = workItemHtml(r);
         var wtHtml = worktreeBadge(r);
-        var nameExtra = (wiHtml ? '<br>'+wiHtml : '') + wtHtml;
+        var hiHtml = hierarchyHtml(r);
+        var nameExtra = (wiHtml ? '<br>'+wiHtml : '') + wtHtml + hiHtml;
         var errMsgShort = r.error_message ? (r.error_message.length > 80 ? esc(r.error_message.substring(0,80))+'\\u2026' : esc(r.error_message)) : '\\u2014';
 
         html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand error details" onclick="toggleExpand(\\'failed-'+jsEsc(key)+'\\') ">';
@@ -1781,6 +1940,14 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
 
     worktree = _detect_worktree(cwd, worktree_cache)
 
+    # Load twig work item hierarchy for twig-sdlc runs
+    hierarchy = None
+    if r.work_item_id and wf_name.startswith("twig-sdlc"):
+        for prefix, db_path in TWIG_DB_PATHS.items():
+            if wf_name.startswith(prefix):
+                hierarchy = _load_twig_hierarchy(r.work_item_id, db_path)
+                break
+
     return {
         "log_file": r.log_file,
         "name": r.name,
@@ -1822,6 +1989,7 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
         "cwd": str(cwd),
         "worktree": worktree,
         "process_alive": process_alive,
+        "hierarchy": hierarchy,
     }
 
 
