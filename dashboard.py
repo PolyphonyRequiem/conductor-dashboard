@@ -1011,14 +1011,11 @@ a:hover { text-decoration: underline; }
 <h2>&#128260; Active Runs</h2>
 <div id="active-runs"></div>
 
+<h2 id="gates-heading" style="display:none">&#128678; Gates Waiting</h2>
+<div id="gate-runs"></div>
+
 <h2 id="abandoned-heading" style="display:none">&#128123; Abandoned Runs <span id="abandoned-count" style="color:var(--text2);font-size:0.8rem;font-weight:normal"></span> <button id="toggle-abandoned" class="toggle-btn" title="Show or hide abandoned runs" onclick="toggleShowAbandoned()">Show</button></h2>
 <div id="abandoned-runs" style="display:none"></div>
-
-<h2>&#9989; Completed Runs <button id="toggle-reviewed-completed" class="toggle-btn" title="Show or hide runs you have already reviewed" onclick="toggleShowReviewedCompleted()">Show Reviewed</button></h2>
-<div id="completed-runs"></div>
-
-<h2>&#10060; Failed Runs <button id="toggle-reviewed-failed" class="toggle-btn" title="Show or hide failed runs you have already reviewed" onclick="toggleShowReviewedFailed()">Show Reviewed</button></h2>
-<div id="failed-runs"></div>
 
 <h2>&#128200; Metrics
     <span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center;font-size:0.8rem;font-weight:normal">
@@ -1049,9 +1046,6 @@ a:hover { text-decoration: underline; }
 // ---------------------------------------------------------------------------
 let dashboardData = null;
 let previousData = null;
-const reviewedRuns = new Set(JSON.parse(localStorage.getItem('conductor-reviewed-runs') || '[]'));
-let showReviewedCompleted = false;
-let showReviewedFailed = false;
 let showAbandoned = localStorage.getItem('conductor-show-abandoned') === '1';
 const expandedRuns = new Set();
 
@@ -1208,15 +1202,31 @@ function renderStats(stats) {
 // ---------------------------------------------------------------------------
 function renderActiveRuns(runs) {
     var el = document.getElementById('active-runs');
+    var gateEl = document.getElementById('gate-runs');
+    var gateHeading = document.getElementById('gates-heading');
     if (!runs || runs.length === 0) {
         el.innerHTML = '<div class="empty" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px;">No active workflows</div>';
+        gateHeading.style.display = 'none';
+        gateEl.innerHTML = '';
         return;
     }
-    var html = '';
+    var activeHtml = '';
+    var gateHtml = '';
     for (var i = 0; i < runs.length; i++) {
-        html += renderRunCard(runs[i], i, 'active');
+        if (runs[i].gate_waiting) {
+            gateHtml += renderRunCard(runs[i], i, 'gate');
+        } else {
+            activeHtml += renderRunCard(runs[i], i, 'active');
+        }
     }
-    el.innerHTML = html;
+    el.innerHTML = activeHtml || '<div class="empty" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px;">No active workflows</div>';
+    if (gateHtml) {
+        gateHeading.style.display = '';
+        gateEl.innerHTML = gateHtml;
+    } else {
+        gateHeading.style.display = 'none';
+        gateEl.innerHTML = '';
+    }
 }
 
 function renderRunCard(r, i, keyPrefix) {
@@ -1312,131 +1322,6 @@ function renderRunCard(r, i, keyPrefix) {
         html += '<div style="margin-top:4px"><code class="replay-cmd">'+esc(r.replay_cmd)+'</code></div>';
         html += '</div></div>';
         return html;
-}
-
-// ---------------------------------------------------------------------------
-// Render: Completed Runs
-// ---------------------------------------------------------------------------
-function renderCompletedRuns(runs) {
-    var el = document.getElementById('completed-runs');
-    if (!runs || runs.length === 0) {
-        el.innerHTML = '<table><tbody><tr><td class="empty" colspan="7">No completed runs</td></tr></tbody></table>';
-        return;
-    }
-    var reviewedCount = 0;
-    for (var i = 0; i < runs.length; i++) {
-        if (reviewedRuns.has(runs[i].log_file)) reviewedCount++;
-    }
-    // Update toggle button text
-    var toggleBtn = document.getElementById('toggle-reviewed-completed');
-    if (toggleBtn) {
-        toggleBtn.textContent = showReviewedCompleted ? 'Hide Reviewed ('+reviewedCount+')' : 'Show Reviewed ('+reviewedCount+')';
-        toggleBtn.className = 'toggle-btn' + (showReviewedCompleted ? ' active' : '');
-    }
-
-    var html = '<table><thead><tr><th>Workflow</th><th>Started</th><th>Duration</th><th>Cost</th><th>Tokens</th><th>Agents</th><th>Actions</th></tr></thead><tbody>';
-    for (var i = 0; i < runs.length; i++) {
-        var r = runs[i];
-        var isReviewed = reviewedRuns.has(r.log_file);
-        if (isReviewed && !showReviewedCompleted) continue;
-        var key = r.log_file;
-        var isExpanded = expandedRuns.has('completed-'+key);
-        var reviewedClass = isReviewed ? ' reviewed' : '';
-        var wiHtml = workItemHtml(r);
-        var wtHtml = worktreeBadge(r);
-        var hiHtml = hierarchyHtml(r);
-        var nameExtra = wiHtml ? '<br>'+wiHtml+wtHtml+hiHtml : (r.purpose ? '<br><span style="color:var(--text2);font-size:0.75rem">'+esc(r.purpose)+'</span>'+wtHtml+hiHtml : wtHtml+hiHtml);
-
-        html += '<tr class="status-completed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand details" onclick="toggleExpand(\\'completed-'+jsEsc(key)+'\\') ">';
-        html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
-        html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
-        html += '<td>'+esc(r.elapsed)+'</td>';
-        html += '<td>'+fmtCost(r.total_cost)+'</td>';
-        html += '<td>'+fmtTokens(r.total_tokens)+'</td>';
-        html += '<td>'+r.agent_count+'</td>';
-        html += '<td>';
-        if (r.review_available) {
-            html += '<button class="action-btn review" title="File closeout findings using the closeout-filing skill" onclick="event.stopPropagation();actionReview(\\''+jsEsc(key)+'\\')">&#128203; Review</button>';
-        } else {
-            html += '<button class="action-btn" disabled title="Skill not found: '+esc(r.review_skill_path)+'" style="opacity:0.4;cursor:not-allowed">&#128203; Review</button>';
-        }
-        html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+jsEsc(key)+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
-        html += '</td></tr>';
-
-        // Expandable detail row
-        html += '<tr class="row-detail'+(isExpanded?' open':'')+'"><td colspan="7">';
-        if (r.agents && r.agents.length > 0) {
-            var lastAgent = r.agents[r.agents.length - 1];
-            html += '<div style="margin-bottom:6px"><strong>Final Agent:</strong> '+esc(lastAgent.name);
-            if (lastAgent.model) html += ' ('+esc(lastAgent.model)+')';
-            html += '</div>';
-        }
-        if (r.purpose) html += '<div><strong>Purpose:</strong> '+esc(r.purpose)+'</div>';
-        html += compositionTreeHtml(r);
-        html += '<div style="margin-top:4px"><code class="replay-cmd">'+esc(r.replay_cmd)+'</code></div>';
-        html += '</td></tr>';
-    }
-    html += '</tbody></table>';
-    el.innerHTML = html;
-}
-
-// ---------------------------------------------------------------------------
-// Render: Failed Runs
-// ---------------------------------------------------------------------------
-function renderFailedRuns(runs) {
-    var el = document.getElementById('failed-runs');
-    if (!runs || runs.length === 0) {
-        el.innerHTML = '<table><tbody><tr><td class="empty" colspan="8">No failed runs</td></tr></tbody></table>';
-        return;
-    }
-    var reviewedCount = 0;
-    for (var i = 0; i < runs.length; i++) {
-        if (reviewedRuns.has(runs[i].log_file)) reviewedCount++;
-    }
-    var toggleBtn = document.getElementById('toggle-reviewed-failed');
-    if (toggleBtn) {
-        toggleBtn.textContent = showReviewedFailed ? 'Hide Reviewed ('+reviewedCount+')' : 'Show Reviewed ('+reviewedCount+')';
-        toggleBtn.className = 'toggle-btn' + (showReviewedFailed ? ' active' : '');
-    }
-
-    var html = '<table><thead><tr><th>Workflow</th><th>Started</th><th>Duration</th><th>Error Type</th><th>Failed Agent</th><th>Error Message</th><th>Actions</th></tr></thead><tbody>';
-    for (var i = 0; i < runs.length; i++) {
-        var r = runs[i];
-        var isReviewed = reviewedRuns.has(r.log_file);
-        if (isReviewed && !showReviewedFailed) continue;
-        var key = r.log_file;
-        var isExpanded = expandedRuns.has('failed-'+key);
-        var reviewedClass = isReviewed ? ' reviewed' : '';
-        var wiHtml = workItemHtml(r);
-        var wtHtml = worktreeBadge(r);
-        var hiHtml = hierarchyHtml(r);
-        var nameExtra = (wiHtml ? '<br>'+wiHtml : '') + wtHtml + hiHtml;
-        var errMsgShort = r.error_message ? (r.error_message.length > 80 ? esc(r.error_message.substring(0,80))+'\\u2026' : esc(r.error_message)) : '\\u2014';
-
-        html += '<tr class="status-failed fade-in'+reviewedClass+'" style="cursor:pointer" title="Click to expand error details" onclick="toggleExpand(\\'failed-'+jsEsc(key)+'\\') ">';
-        html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
-        html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
-        html += '<td>'+esc(r.elapsed)+'</td>';
-        html += '<td>'+(r.error_type ? '<span class="err-type">'+esc(r.error_type)+'</span>' : '\\u2014')+'</td>';
-        html += '<td>'+(r.failed_agent ? '<span class="err-agent">'+esc(r.failed_agent)+'</span>' : '\\u2014')+'</td>';
-        html += '<td>'+errMsgShort+'</td>';
-        html += '<td>';
-        html += '<button class="action-btn investigate" title="Open Copilot to analyze the failure and advise on fixes" onclick="event.stopPropagation();actionInvestigate(\\''+jsEsc(key)+'\\')">&#128269; Investigate</button>';
-        html += '<button class="action-btn restart" title="Re-run this workflow from scratch" onclick="event.stopPropagation();actionRestart(\\''+jsEsc(key)+'\\')">&#128260; Restart</button>';
-        html += '<button class="action-btn'+(isReviewed?' reviewed-btn':'')+'" title="'+(isReviewed?'Unmark as reviewed':'Mark as reviewed — hides from default view')+'" onclick="event.stopPropagation();toggleReviewed(\\''+jsEsc(key)+'\\')">'+( isReviewed ? '&#9745; Reviewed' : '&#9744; Mark Reviewed')+'</button>';
-        html += '</td></tr>';
-
-        // Expandable detail row — full error message
-        html += '<tr class="row-detail'+(isExpanded?' open':'')+'"><td colspan="7">';
-        html += '<div><strong>Full Error:</strong></div>';
-        html += '<pre style="white-space:pre-wrap;color:var(--red);margin-top:4px;font-size:0.8rem">'+esc(r.error_message || 'No error message')+'</pre>';
-        if (r.purpose) html += '<div style="margin-top:6px"><strong>Purpose:</strong> '+esc(r.purpose)+'</div>';
-        html += compositionTreeHtml(r);
-        html += '<div style="margin-top:4px"><code class="replay-cmd">'+esc(r.replay_cmd)+'</code></div>';
-        html += '</td></tr>';
-    }
-    html += '</tbody></table>';
-    el.innerHTML = html;
 }
 
 // ---------------------------------------------------------------------------
@@ -1644,8 +1529,6 @@ function renderAll() {
     renderStats(dashboardData.stats);
     renderActiveRuns(dashboardData.active_runs);
     renderAbandonedRuns(dashboardData.abandoned_runs || []);
-    renderCompletedRuns(dashboardData.completed_runs);
-    renderFailedRuns(dashboardData.failed_runs);
     renderMetrics();
 }
 
@@ -1739,26 +1622,6 @@ function toast(msg, kind) {
     el.style.opacity = '1';
     clearTimeout(window.__toastTimer);
     window.__toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 6000);
-}
-
-// ---------------------------------------------------------------------------
-// Toggle reviewed
-// ---------------------------------------------------------------------------
-function toggleReviewed(logFile) {
-    if (reviewedRuns.has(logFile)) reviewedRuns.delete(logFile);
-    else reviewedRuns.add(logFile);
-    localStorage.setItem('conductor-reviewed-runs', JSON.stringify([...reviewedRuns]));
-    renderAll();
-}
-
-function toggleShowReviewedCompleted() {
-    showReviewedCompleted = !showReviewedCompleted;
-    renderAll();
-}
-
-function toggleShowReviewedFailed() {
-    showReviewedFailed = !showReviewedFailed;
-    renderAll();
 }
 
 // ---------------------------------------------------------------------------
