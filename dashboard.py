@@ -278,11 +278,6 @@ def _parse_event_log(path: Path) -> WorkflowRun:
 
                 elif etype == "agent_prompt_rendered" and not run.purpose:
                     run.purpose = _extract_purpose(data.get("rendered_prompt", ""))
-                    # Extract work item ID from any agent prompt (not just intake)
-                    if not run.work_item_id:
-                        wid_match = re.search(r"#(\d+)", data.get("rendered_prompt", ""))
-                        if wid_match:
-                            run.work_item_id = wid_match.group(1)
 
                 elif etype == "agent_completed":
                     aname = data.get("agent_name", "")
@@ -857,12 +852,6 @@ STATUS_ICONS = {
 # Work item URL templates. Used for any run with a work_item_id.
 WORK_ITEM_URLS: list[str] = [
     "https://dev.azure.com/dangreen-msft/Twig/_workitems/edit/{id}",
-]
-
-# Known project directories for skill/worktree lookups.
-WORKFLOW_DIRS: list[Path] = [
-    Path.home() / "projects" / "twig2",
-    Path.home() / "projects" / "cloudvault-service-api",
 ]
 
 # Twig SQLite DB paths for work item hierarchy lookups.
@@ -2063,16 +2052,6 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
     review_available = skill_path.exists()
 
-    # Fallback: if the resolved dir (e.g. a deleted worktree) doesn't have the
-    # skill, check known project directories.
-    if not review_available:
-        for directory in WORKFLOW_DIRS:
-            fallback_skill = directory / ".github" / "skills" / "closeout-filing" / "SKILL.md"
-            if fallback_skill.exists():
-                skill_path = fallback_skill
-                review_available = True
-                break
-
     worktree = _detect_worktree(cwd, worktree_cache)
 
     # Load work item hierarchy from any available twig DB.
@@ -2199,14 +2178,6 @@ async def action_review(request: Request):
     wf_name = _extract_workflow_name(log_file)
     cwd = _resolve_workflow_dir(log_file, wf_name)
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
-    if not skill_path.exists():
-        # Fallback: check known project directories
-        for directory in WORKFLOW_DIRS:
-            fallback = directory / ".github" / "skills" / "closeout-filing" / "SKILL.md"
-            if fallback.exists():
-                skill_path = fallback
-                cwd = directory
-                break
     if not skill_path.exists():
         return {"error": f"Closeout filing skill not found at {skill_path}"}
     prompt = (
@@ -2375,10 +2346,7 @@ def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
     if best_candidate is not None:
         return best_candidate
 
-    # 2. Static mapping fallback — return the first known directory that exists
-    for directory in WORKFLOW_DIRS:
-        if directory.exists():
-            return directory
+    # 2. Fallback: HOME directory (no assumptions about which project)
     return Path.home()
 
 

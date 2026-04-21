@@ -722,8 +722,8 @@ class TestWorkflowComposition:
         assert len(run.subworkflows) == 1
         assert run.subworkflows[0]["status"] == "running"
 
-    def test_work_item_id_from_non_intake_agent(self, tmp_path: Path):
-        """work_item_id is extracted from any agent prompt, not just intake."""
+    def test_work_item_id_not_extracted_from_prompt(self, tmp_path: Path):
+        """work_item_id must NOT be extracted from raw prompt text (false positives)."""
         events = [
             {"type": "workflow_started", "timestamp": 1000.0,
              "data": {"name": "implementer", "version": "1.0", "agents": []}},
@@ -734,4 +734,22 @@ class TestWorkflowComposition:
         ]
         p = _write_events(tmp_path, events, name="implementer")
         run = _parse_event_log(p)
+        assert run.work_item_id == ""
+
+    def test_work_item_id_from_intake_output(self, tmp_path: Path):
+        """work_item_id is extracted from intake agent structured output."""
+        events = [
+            {"type": "workflow_started", "timestamp": 1000.0,
+             "data": {"name": "twig-sdlc", "version": "1.0", "agents": []}},
+            {"type": "agent_completed", "timestamp": 1005.0,
+             "data": {"agent_name": "intake", "model": "claude-sonnet-4",
+                      "elapsed": 4.0, "tokens": 500, "cost_usd": 0.01,
+                      "output": {"epic_id": 1814, "epic_title": "My Epic",
+                                 "item_type": "Epic"}}},
+            {"type": "workflow_completed", "timestamp": 1010.0, "data": {}},
+        ]
+        p = _write_events(tmp_path, events, name="twig-sdlc")
+        run = _parse_event_log(p)
         assert run.work_item_id == "1814"
+        assert run.work_item_title == "My Epic"
+        assert run.work_item_type == "Epic"
