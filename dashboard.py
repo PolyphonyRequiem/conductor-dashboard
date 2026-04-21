@@ -1193,14 +1193,9 @@ async function fetchDashboard() {
 function renderStats(stats) {
     var el = document.getElementById('stats');
     el.innerHTML =
-        '<div class="stat"><div class="label">Total Runs</div><div class="value blue">'+stats.total+'</div></div>' +
-        '<div class="stat"><div class="label">Completed</div><div class="value green">'+stats.completed+'</div></div>' +
-        '<div class="stat"><div class="label">Failed</div><div class="value red">'+stats.failed+'</div></div>' +
         '<div class="stat"><div class="label">Active Now</div><div class="value yellow">'+stats.active+'</div></div>' +
         '<div class="stat"><div class="label">Gates Waiting</div><div class="value yellow">'+stats.gates_waiting+'</div></div>' +
-        '<div class="stat"><div class="label">Abandoned</div><div class="value red">'+(stats.abandoned||0)+'</div></div>' +
-        '<div class="stat"><div class="label">Total Cost</div><div class="value">'+fmtCost2(stats.total_cost)+'</div></div>' +
-        '<div class="stat"><div class="label">Total Tokens</div><div class="value">'+fmtTokens(stats.total_tokens)+'</div></div>';
+        '<div class="stat"><div class="label">Abandoned</div><div class="value red">'+(stats.abandoned||0)+'</div></div>';
 }
 
 // ---------------------------------------------------------------------------
