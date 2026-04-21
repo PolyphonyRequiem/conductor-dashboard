@@ -1154,8 +1154,6 @@ a:hover { text-decoration: underline; }
 .comp-tree .tree-status { min-width: 18px; text-align: center; }
 .comp-tree .tree-meta { color: var(--text2); font-size: 0.75rem; }
 .comp-tree .tree-section-label { color: var(--text2); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; margin-bottom: 2px; }
-.comp-tree .inline-sub { opacity: 0.7; }
-.tree-cost-badge { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 0.72rem; color: var(--text2); }
 
 /* Reviewed row */
 .reviewed { opacity: 0.45; }
@@ -1303,77 +1301,34 @@ function worktreeBadge(r) {
 var _STATUS_ICON = {completed: '\\u2705', failed: '\\u274c', running: '\\ud83d\\udd04', unknown: '\\u2753'};
 
 function compositionTreeHtml(r) {
-    var children = r.children;
     var subs = r.subworkflows;
-    if ((!children || children.length === 0) && (!subs || subs.length === 0)) return '';
-    var html = '<div class="comp-tree">';
-    html += '<div class="tree-section-label">Composition Tree</div>';
-    // Render child workflow runs (separate log files grouped by work_item_id)
-    if (children && children.length > 0) {
-        for (var i = 0; i < children.length; i++) {
-            var c = children[i];
-            var prefix = (i === children.length - 1 && (!subs || subs.length === 0)) ? '\\u2514\\u2500 ' : '\\u251c\\u2500 ';
-            var icon = _STATUS_ICON[c.status] || '\\u2753';
-            html += '<div class="tree-node">';
-            html += '<span class="tree-prefix">' + prefix + '</span>';
-            html += '<span class="tree-status">' + icon + '</span>';
-            html += '<span class="tree-name">' + esc(c.name) + '</span>';
-            html += '<span class="tree-meta">' + esc(c.elapsed) + '</span>';
-            if (c.total_cost) html += '<span class="tree-cost-badge">' + fmtCost(c.total_cost) + '</span>';
-            html += '</div>';
-            // Show inline subworkflows of this child
-            if (c.subworkflows && c.subworkflows.length > 0) {
-                var subsByWf = {};
-                for (var s = 0; s < c.subworkflows.length; s++) {
-                    var sw = c.subworkflows[s];
-                    var wfName = sw.workflow.replace('./', '').replace('.yaml', '');
-                    if (!subsByWf[wfName]) subsByWf[wfName] = {done: 0, total: 0, elapsed: 0};
-                    subsByWf[wfName].total++;
-                    if (sw.status === 'completed') subsByWf[wfName].done++;
-                    subsByWf[wfName].elapsed += (sw.elapsed || 0);
-                }
-                var cPrefix = (i === children.length - 1) ? '   ' : '\\u2502  ';
-                for (var wfName in subsByWf) {
-                    var info = subsByWf[wfName];
-                    var subIcon = (info.done === info.total) ? '\\u2705' : '\\ud83d\\udd04';
-                    html += '<div class="tree-node inline-sub">';
-                    html += '<span class="tree-prefix">' + cPrefix + '\\u21b3 </span>';
-                    html += '<span class="tree-status">' + subIcon + '</span>';
-                    html += '<span class="tree-name">' + esc(wfName) + '</span>';
-                    html += '<span class="tree-meta">\\u00d7' + info.total;
-                    if (info.done < info.total) html += ' (' + info.done + '/' + info.total + ' done)';
-                    html += '</span>';
-                    html += '</div>';
-                }
-            }
-        }
+    if (!subs || subs.length === 0) return '';
+    // Group inline subworkflows by workflow name
+    var subsByWf = {};
+    for (var s = 0; s < subs.length; s++) {
+        var sw = subs[s];
+        var wfName = sw.workflow.replace('./', '').replace('.yaml', '');
+        if (!subsByWf[wfName]) subsByWf[wfName] = {done: 0, running: 0, total: 0};
+        subsByWf[wfName].total++;
+        if (sw.status === 'completed') subsByWf[wfName].done++;
+        else subsByWf[wfName].running++;
     }
-    // Show inline subworkflows of the root itself
-    if (subs && subs.length > 0) {
-        var subsByWf = {};
-        for (var s = 0; s < subs.length; s++) {
-            var sw = subs[s];
-            var wfName = sw.workflow.replace('./', '').replace('.yaml', '');
-            if (!subsByWf[wfName]) subsByWf[wfName] = {done: 0, total: 0, elapsed: 0};
-            subsByWf[wfName].total++;
-            if (sw.status === 'completed') subsByWf[wfName].done++;
-            subsByWf[wfName].elapsed += (sw.elapsed || 0);
-        }
-        var keys = Object.keys(subsByWf);
-        for (var k = 0; k < keys.length; k++) {
-            var wfName = keys[k];
-            var info = subsByWf[wfName];
-            var subIcon = (info.done === info.total) ? '\\u2705' : '\\ud83d\\udd04';
-            var prefix = (k === keys.length - 1) ? '\\u2514\\u2500 ' : '\\u251c\\u2500 ';
-            html += '<div class="tree-node inline-sub">';
-            html += '<span class="tree-prefix">' + prefix + '\\u21b3 </span>';
-            html += '<span class="tree-status">' + subIcon + '</span>';
-            html += '<span class="tree-name">' + esc(wfName) + '</span>';
-            html += '<span class="tree-meta">\\u00d7' + info.total;
-            if (info.done < info.total) html += ' (' + info.done + '/' + info.total + ' done)';
-            html += '</span>';
-            html += '</div>';
-        }
+    var keys = Object.keys(subsByWf);
+    var html = '<div class="comp-tree">';
+    html += '<div class="tree-section-label">Subworkflows</div>';
+    for (var k = 0; k < keys.length; k++) {
+        var wfName = keys[k];
+        var info = subsByWf[wfName];
+        var subIcon = (info.done === info.total) ? '\\u2705' : '\\ud83d\\udd04';
+        var prefix = (k === keys.length - 1) ? '\\u2514\\u2500 ' : '\\u251c\\u2500 ';
+        html += '<div class="tree-node">';
+        html += '<span class="tree-prefix">' + prefix + '</span>';
+        html += '<span class="tree-status">' + subIcon + '</span>';
+        html += '<span class="tree-name">' + esc(wfName) + '</span>';
+        html += '<span class="tree-meta">\\u00d7' + info.total;
+        if (info.done > 0 && info.done < info.total) html += ' (' + info.done + '/' + info.total + ' done)';
+        html += '</span>';
+        html += '</div>';
     }
     html += '</div>';
     return html;
@@ -1462,7 +1417,7 @@ function renderRunCard(r, i, keyPrefix) {
         html += '<span class="wf-name">'+esc(r.name)+'</span>'+wiBadge;
         html += '<span style="color:var(--text2);margin-left:auto">'+esc(r.elapsed)+'</span>';
         html += '<span>'+agentStatus+'</span>';
-        var costDisplay = (r.children && r.children.length > 0) ? fmtCost(r.tree_total_cost) : fmtCost(r.total_cost);
+        var costDisplay = fmtCost(r.total_cost);
         html += '<span>'+costDisplay+'</span>';
         if (r.dashboard_url) {
             html += '<a class="action-btn" href="'+esc(r.dashboard_url)+'" target="_blank" title="Open per-run conductor dashboard" onclick="event.stopPropagation()" style="margin-left:8px;text-decoration:none">&#128279; Dashboard</a>';
@@ -1558,10 +1513,8 @@ function renderCompletedRuns(runs) {
         html += '<td class="wf-name"><span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span> '+esc(r.name)+nameExtra+'</td>';
         html += '<td class="ts">'+esc(r.started_at_str)+'</td>';
         html += '<td>'+esc(r.elapsed)+'</td>';
-        var cCost = (r.children && r.children.length > 0) ? fmtCost(r.tree_total_cost) : fmtCost(r.total_cost);
-        var cTokens = (r.children && r.children.length > 0) ? fmtTokens(r.tree_total_tokens) : fmtTokens(r.total_tokens);
-        html += '<td>'+cCost+'</td>';
-        html += '<td>'+cTokens+'</td>';
+        html += '<td>'+fmtCost(r.total_cost)+'</td>';
+        html += '<td>'+fmtTokens(r.total_tokens)+'</td>';
         html += '<td>'+r.agent_count+'</td>';
         html += '<td>';
         if (r.review_available) {
@@ -2156,10 +2109,6 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
             }
             for sw in r.subworkflows
         ],
-        "children": [],       # populated by _compute_dashboard grouping
-        "is_child": False,     # set True when nested under a root
-        "tree_total_cost": r.total_cost,
-        "tree_total_tokens": r.total_tokens,
     }
 
 
@@ -2177,65 +2126,13 @@ def _compute_dashboard() -> dict:
 
     all_serialized = [_serialize_run(r, ts_to_port, worktree_cache, alive_pid_runs) for r in sorted_runs]
 
-    # --- Group runs by work_item_id into composition trees ---
-    child_log_files: set[str] = set()
-    wid_groups: dict[str, list[dict]] = {}
-    for sr in all_serialized:
-        wid = sr.get("work_item_id")
-        if wid:
-            wid_groups.setdefault(wid, []).append(sr)
-
-    _STATUS_PRIORITY = {"running": 0, "failed": 1, "completed": 2, "unknown": 3}
-
-    for wid, group in wid_groups.items():
-        if len(group) < 2:
-            continue
-        # Pick root: prefer running over terminal, then newest.
-        # This prevents a completed run from being root while a sibling
-        # is still running (which would hide live work).
-        def _root_sort_key(sr: dict) -> tuple:
-            status_pri = _STATUS_PRIORITY.get(sr.get("status", "unknown"), 3)
-            started = -(sr.get("started_at") or 0)  # newest first
-            return (status_pri, started)
-
-        group.sort(key=_root_sort_key)
-        root = group[0]
-
-        children = group[1:]
-        # Deduplicate: for each workflow name, keep only the latest run
-        # (newest first since group was sorted). Earlier failed retries are noise.
-        seen_names: set[str] = set()
-        deduped: list[dict] = []
-        for child in sorted(children, key=lambda sr: -(sr.get("started_at") or 0)):
-            name = child.get("name", "")
-            if name not in seen_names:
-                seen_names.add(name)
-                deduped.append(child)
-        # Sort survivors chronologically (oldest first)
-        deduped.sort(key=lambda sr: sr.get("started_at") or 0)
-
-        for child in children:
-            child["is_child"] = True
-            child_log_files.add(child["log_file"])
-        root["children"] = deduped
-        # Aggregate tree metrics (across ALL runs, not just deduped display)
-        root["tree_total_cost"] = root["total_cost"] + sum(c["total_cost"] for c in children)
-        root["tree_total_tokens"] = root["total_tokens"] + sum(c["total_tokens"] for c in children)
-        # Tree status: worst-of across all runs (running > failed > completed)
-        worst = min(_STATUS_PRIORITY.get(sr.get("status", "unknown"), 3) for sr in group)
-        root["tree_status"] = {0: "running", 1: "failed", 2: "completed"}.get(worst, "unknown")
-
-    # Filter out children from top-level lists
-    def _not_child(sr: dict) -> bool:
-        return sr["log_file"] not in child_log_files
-
     all_running = [sr for sr in all_serialized if sr["status"] == "running"]
-    active_runs = [sr for sr in all_running if sr["process_alive"] and _not_child(sr)]
-    abandoned_runs = [sr for sr in all_running if not sr["process_alive"] and _not_child(sr)]
-    completed_runs = [sr for sr in all_serialized if sr["status"] == "completed" and _not_child(sr)]
-    failed_runs = [sr for sr in all_serialized if sr["status"] == "failed" and _not_child(sr)]
+    active_runs = [sr for sr in all_running if sr["process_alive"]]
+    abandoned_runs = [sr for sr in all_running if not sr["process_alive"]]
+    completed_runs = [sr for sr in all_serialized if sr["status"] == "completed"]
+    failed_runs = [sr for sr in all_serialized if sr["status"] == "failed"]
     other_runs = [sr for sr in all_serialized
-                  if sr["status"] not in ("running", "completed", "failed") and _not_child(sr)]
+                  if sr["status"] not in ("running", "completed", "failed")]
 
     gates_waiting = sum(1 for r in active_runs if r["gate_waiting"])
     gates_abandoned = sum(1 for r in abandoned_runs if r["gate_waiting"])
