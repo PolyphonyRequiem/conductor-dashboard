@@ -831,22 +831,21 @@ STATUS_ICONS = {
     "unknown": "❓",
 }
 
-# Work item URL patterns keyed by workflow name prefix.
-# Falls back to the first entry if no match.
-WORK_ITEM_URLS: dict[str, str] = {
-    "twig": "https://dev.azure.com/dangreen-msft/Twig/_workitems/edit/{id}",
-}
+# Work item URL templates. Used for any run with a work_item_id.
+WORK_ITEM_URLS: list[str] = [
+    "https://dev.azure.com/dangreen-msft/Twig/_workitems/edit/{id}",
+]
 
-# Map workflow name prefixes to the project directory they operate on.
-WORKFLOW_DIRS: dict[str, Path] = {
-    "twig": Path.home() / "projects" / "twig2",
-    "cloudvault": Path.home() / "projects" / "cloudvault-service-api",
-}
+# Known project directories for skill/worktree lookups.
+WORKFLOW_DIRS: list[Path] = [
+    Path.home() / "projects" / "twig2",
+    Path.home() / "projects" / "cloudvault-service-api",
+]
 
-# Twig SQLite DB paths keyed by workflow name prefix.
-TWIG_DB_PATHS: dict[str, Path] = {
-    "twig": Path.home() / ".twig" / "https___dev.azure.com_dangreen-msft" / "Twig" / "twig.db",
-}
+# Twig SQLite DB paths for work item hierarchy lookups.
+TWIG_DB_PATHS: list[Path] = [
+    Path.home() / ".twig" / "https___dev.azure.com_dangreen-msft" / "Twig" / "twig.db",
+]
 
 # Ordered hierarchy levels for deterministic display.
 _HIERARCHY_LEVELS = ["Epic", "Feature", "Issue", "Task"]
@@ -956,12 +955,7 @@ def _work_item_html(run: WorkflowRun, font_size: str = "0.85rem") -> str:
     """Build HTML snippet for a work item link, or empty string if none."""
     if not run.work_item_id:
         return ""
-    # Find URL template by workflow name prefix
-    url_template = ""
-    for prefix, tpl in WORK_ITEM_URLS.items():
-        if run.name.startswith(prefix):
-            url_template = tpl
-            break
+    url_template = WORK_ITEM_URLS[0] if WORK_ITEM_URLS else ""
     wi_id_html = f'#{_esc(run.work_item_id)}'
     if url_template:
         url = url_template.replace("{id}", run.work_item_id)
@@ -2049,11 +2043,8 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
 
     # Build work item URL
     work_item_url = ""
-    if r.work_item_id:
-        for prefix, tpl in WORK_ITEM_URLS.items():
-            if r.name.startswith(prefix):
-                work_item_url = tpl.replace("{id}", r.work_item_id)
-                break
+    if r.work_item_id and WORK_ITEM_URLS:
+        work_item_url = WORK_ITEM_URLS[0].replace("{id}", r.work_item_id)
 
     # Check if closeout-filing skill is available for review
     wf_name = r.name or ""
@@ -2062,24 +2053,21 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
     review_available = skill_path.exists()
 
     # Fallback: if the resolved dir (e.g. a deleted worktree) doesn't have the
-    # skill, check the primary project directory from WORKFLOW_DIRS.
+    # skill, check known project directories.
     if not review_available:
-        for prefix, directory in WORKFLOW_DIRS.items():
-            if wf_name.startswith(prefix):
-                fallback_skill = directory / ".github" / "skills" / "closeout-filing" / "SKILL.md"
-                if fallback_skill.exists():
-                    skill_path = fallback_skill
-                    review_available = True
+        for directory in WORKFLOW_DIRS:
+            fallback_skill = directory / ".github" / "skills" / "closeout-filing" / "SKILL.md"
+            if fallback_skill.exists():
+                skill_path = fallback_skill
+                review_available = True
                 break
 
     worktree = _detect_worktree(cwd, worktree_cache)
 
-    # Load twig work item hierarchy for any run with a work_item_id.
-    # Try all available twig DBs — the run name may differ from the
-    # workflow prefix (e.g. composed child named "issue-review").
+    # Load work item hierarchy from any available twig DB.
     hierarchy = None
     if r.work_item_id:
-        for db_path in TWIG_DB_PATHS.values():
+        for db_path in TWIG_DB_PATHS:
             hierarchy = _load_twig_hierarchy(r.work_item_id, db_path)
             if hierarchy:
                 break
@@ -2247,13 +2235,12 @@ async def action_review(request: Request):
     cwd = _resolve_workflow_dir(log_file, wf_name)
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
     if not skill_path.exists():
-        # Fallback to primary project dir
-        for prefix, directory in WORKFLOW_DIRS.items():
-            if wf_name.startswith(prefix):
-                fallback = directory / ".github" / "skills" / "closeout-filing" / "SKILL.md"
-                if fallback.exists():
-                    skill_path = fallback
-                    cwd = directory
+        # Fallback: check known project directories
+        for directory in WORKFLOW_DIRS:
+            fallback = directory / ".github" / "skills" / "closeout-filing" / "SKILL.md"
+            if fallback.exists():
+                skill_path = fallback
+                cwd = directory
                 break
     if not skill_path.exists():
         return {"error": f"Closeout filing skill not found at {skill_path}"}
@@ -2423,11 +2410,10 @@ def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
     if best_candidate is not None:
         return best_candidate
 
-    # 2. Static mapping fallback
-    for prefix, directory in WORKFLOW_DIRS.items():
-        if wf_name.startswith(prefix):
-            if directory.exists():
-                return directory
+    # 2. Static mapping fallback — return the first known directory that exists
+    for directory in WORKFLOW_DIRS:
+        if directory.exists():
+            return directory
     return Path.home()
 
 
