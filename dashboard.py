@@ -1751,11 +1751,13 @@ function toggleShowAbandoned() {
 // ---------------------------------------------------------------------------
 async function actionReview(logFile) {
     try {
-        await fetch('/api/action/review', {
+        var res = await fetch('/api/action/review', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({log_file: logFile})
         });
+        var data = await res.json();
+        if (data.error) alert('Review failed: ' + data.error);
     } catch (e) { console.error('Review action failed:', e); }
 }
 
@@ -2068,6 +2070,15 @@ async def action_review(request: Request):
     wf_name = _extract_workflow_name(log_file)
     cwd = _resolve_workflow_dir(log_file, wf_name)
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
+    if not skill_path.exists():
+        # Fallback to primary project dir
+        for prefix, directory in WORKFLOW_DIRS.items():
+            if wf_name.startswith(prefix):
+                fallback = directory / ".github" / "skills" / "closeout-filing" / "SKILL.md"
+                if fallback.exists():
+                    skill_path = fallback
+                    cwd = directory
+                break
     if not skill_path.exists():
         return {"error": f"Closeout filing skill not found at {skill_path}"}
     prompt = (
