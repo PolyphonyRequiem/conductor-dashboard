@@ -2074,12 +2074,14 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
 
     worktree = _detect_worktree(cwd, worktree_cache)
 
-    # Load twig work item hierarchy for any run with a work_item_id
+    # Load twig work item hierarchy for any run with a work_item_id.
+    # Try all available twig DBs — the run name may differ from the
+    # workflow prefix (e.g. composed child named "issue-review").
     hierarchy = None
     if r.work_item_id:
-        for prefix, db_path in TWIG_DB_PATHS.items():
-            if wf_name.startswith(prefix):
-                hierarchy = _load_twig_hierarchy(r.work_item_id, db_path)
+        for db_path in TWIG_DB_PATHS.values():
+            hierarchy = _load_twig_hierarchy(r.work_item_id, db_path)
+            if hierarchy:
                 break
 
     return {
