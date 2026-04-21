@@ -561,3 +561,177 @@ class TestAPIEndpoints:
         assert "costs" in data
         assert "metrics" in data
         assert "runs_raw" in data
+
+
+# ===========================================================================
+# Workflow Composition (subworkflow depth tracking)
+# ===========================================================================
+
+class TestWorkflowComposition:
+    """Tests for nested subworkflow parsing and depth tracking."""
+
+    def _subworkflow_events(self, ts: float = 1000.0) -> list[dict]:
+        """Outer workflow with one inline subworkflow that completes."""
+        return [
+            {"type": "workflow_started", "timestamp": ts,
+             "data": {"name": "outer-orchestrator", "version": "1.0",
+                      "agents": [{"name": "dispatcher", "type": "agent"}]}},
+            {"type": "agent_started", "timestamp": ts + 1,
+             "data": {"agent_name": "dispatcher", "iteration": 1}},
+            {"type": "subworkflow_started", "timestamp": ts + 2,
+             "data": {"agent_name": "dispatcher", "workflow": "./child.yaml",
+                      "item_key": "0"}},
+            # Child workflow events (inline, same log file)
+            {"type": "workflow_started", "timestamp": ts + 2,
+             "data": {"name": "child", "version": "1.0", "agents": []}},
+            {"type": "agent_started", "timestamp": ts + 3,
+             "data": {"agent_name": "worker", "iteration": 1}},
+            {"type": "agent_completed", "timestamp": ts + 8,
+             "data": {"agent_name": "worker", "model": "claude-sonnet-4",
+                      "elapsed": 5.0, "tokens": 500, "cost_usd": 0.01}},
+            {"type": "workflow_completed", "timestamp": ts + 9, "data": {}},
+            # Back to parent
+            {"type": "subworkflow_completed", "timestamp": ts + 9,
+             "data": {"agent_name": "dispatcher", "elapsed": 7.0}},
+            {"type": "agent_completed", "timestamp": ts + 10,
+             "data": {"agent_name": "dispatcher", "model": "claude-sonnet-4",
+                      "elapsed": 9.0, "tokens": 200, "cost_usd": 0.02}},
+            {"type": "workflow_completed", "timestamp": ts + 12, "data": {}},
+        ]
+
+    def test_outer_name_preserved(self, tmp_path: Path):
+        """Subworkflow workflow_started must not override outer name."""
+        p = _write_events(tmp_path, self._subworkflow_events(), name="outer-orchestrator")
+        run = _parse_event_log(p)
+        assert run.name == "outer-orchestrator"
+
+    def test_outer_status_not_set_by_child_completion(self, tmp_path: Path):
+        """Child workflow_completed at depth>0 must not set outer status."""
+        # Remove the outer workflow_completed to test isolation
+        events = self._subworkflow_events()
+        events = [e for e in events if not (
+            e["type"] == "workflow_completed" and e["timestamp"] == 1012.0
+        )]
+        p = _write_events(tmp_path, events, name="outer-orchestrator")
+        run = _parse_event_log(p)
+        # Without the outer completed event, status should NOT be "completed"
+        assert run.status != "completed"
+
+    def test_outer_completed_at_depth_zero(self, tmp_path: Path):
+        """Only depth-0 workflow_completed sets terminal status."""
+        p = _write_events(tmp_path, self._subworkflow_events(), name="outer-orchestrator")
+        run = _parse_event_log(p)
+        assert run.status == "completed"
+        assert run.ended_at == 1012.0
+
+    def test_subworkflows_tracked(self, tmp_path: Path):
+        """subworkflow_started/completed events populate subworkflows list."""
+        p = _write_events(tmp_path, self._subworkflow_events(), name="outer-orchestrator")
+        run = _parse_event_log(p)
+        assert len(run.subworkflows) == 1
+        sw = run.subworkflows[0]
+        assert sw["workflow"] == "./child.yaml"
+        assert sw["status"] == "completed"
+        assert sw["agent"] == "dispatcher"
+
+    def test_for_each_subworkflow_completion(self, tmp_path: Path):
+        """For-each loops: child workflow_completed marks subworkflow done
+        even without subworkflow_completed event."""
+        events = [
+            {"type": "workflow_started", "timestamp": 1000.0,
+             "data": {"name": "dispatcher", "version": "1.0", "agents": []}},
+            # 3 for-each subworkflows with NO subworkflow_completed
+            {"type": "subworkflow_started", "timestamp": 1001.0,
+             "data": {"agent_name": "planner", "workflow": "./plan.yaml",
+                      "item_key": "0"}},
+            {"type": "workflow_started", "timestamp": 1001.0,
+             "data": {"name": "plan", "agents": []}},
+            {"type": "workflow_completed", "timestamp": 1005.0, "data": {}},
+            {"type": "subworkflow_started", "timestamp": 1006.0,
+             "data": {"agent_name": "planner", "workflow": "./plan.yaml",
+                      "item_key": "1"}},
+            {"type": "workflow_started", "timestamp": 1006.0,
+             "data": {"name": "plan", "agents": []}},
+            {"type": "workflow_completed", "timestamp": 1010.0, "data": {}},
+            {"type": "subworkflow_started", "timestamp": 1011.0,
+             "data": {"agent_name": "planner", "workflow": "./plan.yaml",
+                      "item_key": "2"}},
+            {"type": "workflow_started", "timestamp": 1011.0,
+             "data": {"name": "plan", "agents": []}},
+            {"type": "workflow_completed", "timestamp": 1015.0, "data": {}},
+            # Outer completes
+            {"type": "workflow_completed", "timestamp": 1020.0, "data": {}},
+        ]
+        p = _write_events(tmp_path, events, name="dispatcher")
+        run = _parse_event_log(p)
+        assert run.name == "dispatcher"
+        assert run.status == "completed"
+        assert len(run.subworkflows) == 3
+        for sw in run.subworkflows:
+            assert sw["status"] == "completed", f"Subworkflow {sw['item_key']} not completed"
+
+    def test_many_nested_subworkflows_depth_correct(self, tmp_path: Path):
+        """Verify depth tracking stays correct with many sequential subworkflows."""
+        events = [
+            {"type": "workflow_started", "timestamp": 1000.0,
+             "data": {"name": "implementer", "version": "1.0", "agents": []}},
+        ]
+        # 5 sequential subworkflows
+        ts = 1001.0
+        for i in range(5):
+            events.extend([
+                {"type": "subworkflow_started", "timestamp": ts,
+                 "data": {"agent_name": "builder", "workflow": "./build.yaml",
+                          "iteration": str(i + 1)}},
+                {"type": "workflow_started", "timestamp": ts,
+                 "data": {"name": "build", "agents": []}},
+                {"type": "workflow_completed", "timestamp": ts + 5, "data": {}},
+                {"type": "subworkflow_completed", "timestamp": ts + 5,
+                 "data": {"agent_name": "builder", "elapsed": 5.0}},
+            ])
+            ts += 10
+        events.append(
+            {"type": "workflow_completed", "timestamp": ts, "data": {}}
+        )
+        p = _write_events(tmp_path, events, name="implementer")
+        run = _parse_event_log(p)
+        assert run.name == "implementer"
+        assert run.status == "completed"
+        assert len(run.subworkflows) == 5
+        assert all(sw["status"] == "completed" for sw in run.subworkflows)
+
+    def test_running_workflow_with_active_subworkflow(self, tmp_path: Path):
+        """A workflow with an in-progress subworkflow stays running."""
+        events = [
+            {"type": "workflow_started", "timestamp": 1000.0,
+             "data": {"name": "implementer", "version": "1.0", "agents": []}},
+            {"type": "subworkflow_started", "timestamp": 1001.0,
+             "data": {"agent_name": "builder", "workflow": "./build.yaml"}},
+            {"type": "workflow_started", "timestamp": 1001.0,
+             "data": {"name": "build", "agents": []}},
+            {"type": "agent_started", "timestamp": 1002.0,
+             "data": {"agent_name": "coder", "iteration": 1}},
+            {"type": "agent_tool_start", "timestamp": 1003.0,
+             "data": {"agent_name": "coder", "tool": "edit"}},
+            # No workflow_completed — still running
+        ]
+        p = _write_events(tmp_path, events, name="implementer", old=False)
+        run = _parse_event_log(p)
+        assert run.name == "implementer"
+        assert run.status == "running"
+        assert len(run.subworkflows) == 1
+        assert run.subworkflows[0]["status"] == "running"
+
+    def test_work_item_id_from_non_intake_agent(self, tmp_path: Path):
+        """work_item_id is extracted from any agent prompt, not just intake."""
+        events = [
+            {"type": "workflow_started", "timestamp": 1000.0,
+             "data": {"name": "implementer", "version": "1.0", "agents": []}},
+            {"type": "agent_prompt_rendered", "timestamp": 1001.0,
+             "data": {"agent_name": "plan_reader",
+                      "rendered_prompt": "Read work item #1814 and gather context."}},
+            {"type": "workflow_completed", "timestamp": 1010.0, "data": {}},
+        ]
+        p = _write_events(tmp_path, events, name="implementer")
+        run = _parse_event_log(p)
+        assert run.work_item_id == "1814"

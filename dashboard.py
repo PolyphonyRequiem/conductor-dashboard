@@ -327,6 +327,14 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                     if wf_depth == 0:
                         run.status = "completed"
                         run.ended_at = ts
+                    else:
+                        # Child workflow completed — mark matching subworkflow
+                        # done. Handles for-each loops that emit workflow_completed
+                        # but NOT subworkflow_completed.
+                        for sw in reversed(run.subworkflows):
+                            if sw["status"] == "running":
+                                sw["status"] = "completed"
+                                break
 
                 elif etype == "workflow_failed":
                     wf_depth = max(0, wf_depth - 1)
@@ -336,6 +344,11 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         run.error_type = data.get("error_type", "")
                         run.error_message = data.get("message", "")
                         run.failed_agent = data.get("agent_name", "")
+                    else:
+                        for sw in reversed(run.subworkflows):
+                            if sw["status"] == "running":
+                                sw["status"] = "failed"
+                                break
 
                 elif etype == "route_taken":
                     run.routes.append(data)
