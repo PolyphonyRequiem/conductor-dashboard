@@ -14,7 +14,6 @@ import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import socket
 import sys
@@ -284,8 +283,12 @@ def _parse_event_log(path: Path) -> WorkflowRun:
 
                 elif etype == "agent_completed":
                     aname = data.get("agent_name", "")
-                    # Extract enriched metadata from twig intake agent
-                    if aname == "intake":
+                    # Extract work item ID from agent output.
+                    # Uses metadata.work_item_id_agent / work_item_id_field if declared,
+                    # otherwise falls back to intake agent with epic_id (backward compat).
+                    wid_agent = run.metadata.get("work_item_id_agent", "intake")
+                    wid_field = run.metadata.get("work_item_id_field", "epic_id")
+                    if aname == wid_agent:
                         output = data.get("output", {})
                         if isinstance(output, str):
                             try:
@@ -293,7 +296,9 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                             except (json.JSONDecodeError, ValueError):
                                 output = {}
                         if isinstance(output, dict):
-                            run.work_item_id = str(output.get("epic_id", run.work_item_id))
+                            extracted_id = output.get(wid_field)
+                            if extracted_id:
+                                run.work_item_id = str(extracted_id)
                             run.work_item_title = output.get("epic_title", "")
                             run.work_item_type = output.get("item_type", "")
                             if run.work_item_title and not run.purpose:
@@ -625,62 +630,6 @@ def _load_active_runs() -> list[ActiveRun]:
 # ---------------------------------------------------------------------------
 # Aggregation helpers
 # ---------------------------------------------------------------------------
-def _detect_worktree(cwd: Path, cache: dict[str, dict]) -> dict:
-    """Return info about the git worktree covering *cwd*.
-
-    Uses a short-timeout git invocation. Results are cached in *cache*
-    (keyed by str(cwd)) so repeated calls within one dashboard refresh
-    don't re-shell-out.
-    """
-    key = str(cwd)
-    if key in cache:
-        return cache[key]
-    info: dict = {}
-    try:
-        top = subprocess.run(
-            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=1.5,
-        )
-        if top.returncode != 0:
-            cache[key] = info
-            return info
-        toplevel = top.stdout.strip()
-        if not toplevel:
-            cache[key] = info
-            return info
-        br = subprocess.run(
-            ["git", "-C", str(cwd), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=1.5,
-        )
-        branch = br.stdout.strip() if br.returncode == 0 else ""
-        wl = subprocess.run(
-            ["git", "-C", str(cwd), "worktree", "list", "--porcelain"],
-            capture_output=True, text=True, timeout=1.5,
-        )
-        main_wt = ""
-        if wl.returncode == 0:
-            for line in wl.stdout.splitlines():
-                if line.startswith("worktree "):
-                    main_wt = line[len("worktree "):].strip()
-                    break
-        is_worktree = False
-        try:
-            if main_wt:
-                is_worktree = Path(main_wt).resolve() != Path(toplevel).resolve()
-        except Exception:
-            is_worktree = False
-        info = {
-            "path": toplevel,
-            "name": Path(toplevel).name,
-            "is_worktree": is_worktree,
-            "branch": branch,
-        }
-    except Exception:
-        info = {}
-    cache[key] = info
-    return info
-
-
 def _aggregate_metrics(runs: list[WorkflowRun]) -> dict[str, Any]:
     """Aggregate rich metrics across runs (server-side, all-time)."""
     by_workflow: dict[str, dict] = {}
@@ -855,136 +804,6 @@ STATUS_ICONS = {
     "parse_error": "⁉️",
     "unknown": "❓",
 }
-
-# Work item URL templates. Used for any run with a work_item_id.
-WORK_ITEM_URLS: list[str] = [
-    "https://dev.azure.com/dangreen-msft/Twig/_workitems/edit/{id}",
-]
-
-# Twig SQLite DB paths for work item hierarchy lookups.
-TWIG_DB_PATHS: list[Path] = [
-    Path.home() / ".twig" / "https___dev.azure.com_dangreen-msft" / "Twig" / "twig.db",
-]
-
-# Ordered hierarchy levels for deterministic display.
-_HIERARCHY_LEVELS = ["Epic", "Feature", "Issue", "Task"]
-
-# Cache: work_item_id -> (timestamp, result)
-_hierarchy_cache: dict[int, tuple[float, dict | None]] = {}
-_HIERARCHY_TTL = 15  # seconds
-
-
-def _load_twig_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
-    """Load work item hierarchy status from the twig SQLite DB.
-
-    Returns a dict like:
-        {
-            "focus": {"id": 1782, "type": "Issue", "state": "Done", "title": "..."},
-            "levels": [
-                {"type": "Task", "To Do": 1, "Doing": 2, "Done": 5, "total": 8}
-            ]
-        }
-    Returns None if the DB is unavailable or the item doesn't exist.
-    """
-    try:
-        wid = int(work_item_id)
-    except (ValueError, TypeError):
-        return None
-
-    now = time.time()
-    cached = _hierarchy_cache.get(wid)
-    if cached and (now - cached[0]) < _HIERARCHY_TTL:
-        return cached[1]
-
-    if not db_path.exists():
-        _hierarchy_cache[wid] = (now, None)
-        return None
-
-    result = None
-    try:
-        uri = f"file:{db_path}?mode=ro"
-        conn = sqlite3.connect(uri, uri=True, timeout=0.5)
-        conn.execute("PRAGMA journal_mode")  # ensure connection is live
-        cur = conn.cursor()
-
-        # Focus item
-        row = cur.execute(
-            "SELECT id, type, title, state FROM work_items WHERE id = ?", (wid,)
-        ).fetchone()
-        if not row:
-            conn.close()
-            _hierarchy_cache[wid] = (now, None)
-            return None
-
-        focus = {"id": row[0], "type": row[1], "title": row[2], "state": row[3]}
-
-        # Descendant breakdown by type and state using recursive CTE
-        rows = cur.execute("""
-            WITH RECURSIVE descendants AS (
-                SELECT id, type, state FROM work_items WHERE parent_id = ?
-                UNION ALL
-                SELECT w.id, w.type, w.state FROM work_items w
-                JOIN descendants d ON w.parent_id = d.id
-            )
-            SELECT type, state, COUNT(*) FROM descendants GROUP BY type, state
-        """, (wid,)).fetchall()
-        conn.close()
-
-        # Build levels dict: {type: {state: count}}
-        level_map: dict[str, dict[str, int]] = {}
-        for typ, state, cnt in rows:
-            if typ not in level_map:
-                level_map[typ] = {}
-            level_map[typ][state] = cnt
-
-        # Convert to ordered list
-        levels = []
-        for lvl in _HIERARCHY_LEVELS:
-            if lvl in level_map:
-                counts = level_map[lvl]
-                total = sum(counts.values())
-                levels.append({
-                    "type": lvl,
-                    "To Do": counts.get("To Do", 0),
-                    "Doing": counts.get("Doing", 0),
-                    "Done": counts.get("Done", 0),
-                    "total": total,
-                })
-        # Include any types not in the standard list
-        for lvl, counts in level_map.items():
-            if lvl not in _HIERARCHY_LEVELS:
-                total = sum(counts.values())
-                levels.append({
-                    "type": lvl,
-                    "To Do": counts.get("To Do", 0),
-                    "Doing": counts.get("Doing", 0),
-                    "Done": counts.get("Done", 0),
-                    "total": total,
-                })
-
-        result = {"focus": focus, "levels": levels}
-    except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError):
-        result = None
-
-    _hierarchy_cache[wid] = (now, result)
-    return result
-
-
-def _work_item_html(run: WorkflowRun, font_size: str = "0.85rem") -> str:
-    """Build HTML snippet for a work item link, or empty string if none."""
-    if not run.work_item_id:
-        return ""
-    url_template = WORK_ITEM_URLS[0] if WORK_ITEM_URLS else ""
-    wi_id_html = f'#{_esc(run.work_item_id)}'
-    if url_template:
-        url = url_template.replace("{id}", run.work_item_id)
-        wi_id_html = f'<a href="{_esc(url)}" target="_blank" style="color:var(--accent);text-decoration:none">#{_esc(run.work_item_id)}</a>'
-    type_html = ""
-    if run.work_item_type:
-        type_color = "var(--green)" if run.work_item_type == "Epic" else "var(--blue)"
-        type_html = f'<span style="color:{type_color};font-weight:500">{_esc(run.work_item_type)}</span> '
-    title_html = f' {_esc(run.work_item_title)}' if run.work_item_title else ""
-    return f'<br><span style="font-size:{font_size}">📋 {type_html}{wi_id_html}{title_html}</span>'
 
 
 def _esc(s: str) -> str:
@@ -2016,11 +1835,8 @@ async def api_dashboard():
 
 
 def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
-                   worktree_cache: dict[str, dict] | None = None,
                    alive_pid_runs: list["ActiveRun"] | None = None) -> dict:
     """Convert a WorkflowRun to a JSON-serializable dict."""
-    if worktree_cache is None:
-        worktree_cache = {}
     if alive_pid_runs is None:
         alive_pid_runs = []
     # Find matching dashboard port
@@ -2048,26 +1864,25 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
         except OSError:
             pass
 
-    # Build work item URL
-    work_item_url = ""
-    if r.work_item_id and WORK_ITEM_URLS:
-        work_item_url = WORK_ITEM_URLS[0].replace("{id}", r.work_item_id)
-
     # Check if closeout-filing skill is available for review
     wf_name = r.name or ""
     cwd = _resolve_workflow_dir(r.log_file, wf_name)
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
     review_available = skill_path.exists()
 
-    worktree = _detect_worktree(cwd, worktree_cache)
+    # Run enricher plugins (namespaced output)
+    from enrichers import EnrichmentContext, run_enrichers
+    ctx = EnrichmentContext(
+        log_file=r.log_file,
+        wf_name=wf_name,
+        _cwd=cwd,
+        _cwd_resolved=True,
+    )
+    enrichments = run_enrichers(r, r.metadata, ctx)
 
-    # Load work item hierarchy from any available twig DB.
-    hierarchy = None
-    if r.work_item_id:
-        for db_path in TWIG_DB_PATHS:
-            hierarchy = _load_twig_hierarchy(r.work_item_id, db_path)
-            if hierarchy:
-                break
+    # Extract enricher data for backward-compatible field placement
+    ado_data = enrichments.get("ado", {})
+    git_data = enrichments.get("git", {})
 
     return {
         "log_file": r.log_file,
@@ -2101,16 +1916,16 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
         "work_item_id": r.work_item_id,
         "work_item_title": r.work_item_title,
         "work_item_type": r.work_item_type,
-        "work_item_url": work_item_url,
+        "work_item_url": ado_data.get("work_item_url", ""),
         "dashboard_port": dashboard_port,
         "dashboard_url": f"http://localhost:{dashboard_port}" if dashboard_port else "",
         "replay_cmd": f'conductor replay "{r.log_file}" --web-bg',
         "review_available": review_available,
         "review_skill_path": str(skill_path),
         "cwd": str(cwd),
-        "worktree": worktree,
+        "worktree": git_data.get("worktree", {}),
         "process_alive": process_alive,
-        "hierarchy": hierarchy,
+        "hierarchy": ado_data.get("hierarchy"),
         "subworkflows": [
             {
                 "workflow": sw["workflow"],
@@ -2132,12 +1947,18 @@ def _compute_dashboard() -> dict:
     errors = _aggregate_errors(runs)
     metrics = _aggregate_metrics(runs)
     ts_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
-    worktree_cache: dict[str, dict] = {}
     alive_pid_runs = [a for a in _load_active_runs() if a.alive]
+
+    # Clear git worktree cache between refreshes
+    try:
+        from enrichers.git import clear_cache as clear_git_cache
+        clear_git_cache()
+    except ImportError:
+        pass
 
     sorted_runs = sorted(runs, key=lambda r: r.started_at or 0, reverse=True)
 
-    all_serialized = [_serialize_run(r, ts_to_port, worktree_cache, alive_pid_runs) for r in sorted_runs]
+    all_serialized = [_serialize_run(r, ts_to_port, alive_pid_runs) for r in sorted_runs]
 
     all_running = [sr for sr in all_serialized if sr["status"] == "running"]
     active_runs = [sr for sr in all_running if sr["process_alive"]]
