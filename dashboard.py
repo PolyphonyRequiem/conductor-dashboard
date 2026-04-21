@@ -1941,6 +1941,17 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
     review_available = skill_path.exists()
 
+    # Fallback: if the resolved dir (e.g. a deleted worktree) doesn't have the
+    # skill, check the primary project directory from WORKFLOW_DIRS.
+    if not review_available:
+        for prefix, directory in WORKFLOW_DIRS.items():
+            if wf_name.startswith(prefix):
+                fallback_skill = directory / ".github" / "skills" / "closeout-filing" / "SKILL.md"
+                if fallback_skill.exists():
+                    skill_path = fallback_skill
+                    review_available = True
+                break
+
     worktree = _detect_worktree(cwd, worktree_cache)
 
     # Load twig work item hierarchy for twig-sdlc runs
