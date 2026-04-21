@@ -1469,21 +1469,52 @@ function renderRunCard(r, i, keyPrefix) {
         }
         html += '</div>';
 
-        // Expanded body
+        // Expanded body — focused on context, not agent minutiae
         html += '<div class="run-card-body'+(isExpanded?' open':'')+'">';
-        if (r.agents && r.agents.length > 0) {
-            html += '<div style="margin-bottom:6px;font-weight:600;color:var(--text)">Completed Agents:</div>';
-            html += '<table style="margin-bottom:8px"><thead><tr><th>Agent</th><th>Model</th><th>Cost</th><th>Tokens</th></tr></thead><tbody>';
-            for (var j = 0; j < r.agents.length; j++) {
-                var a = r.agents[j];
-                html += '<tr><td>'+esc(a.name)+'</td><td>'+esc(a.model)+'</td><td>'+fmtCost(a.cost_usd)+'</td><td>'+fmtTokens(a.tokens)+'</td></tr>';
-            }
-            html += '</tbody></table>';
+
+        // Worktree info (prominent)
+        var wt = r.worktree;
+        if (wt && (wt.branch || wt.name)) {
+            var dirIcon = wt.is_worktree ? '&#128230;' : '&#128193;';
+            html += '<div style="margin-bottom:8px;font-size:0.85rem">';
+            if (wt.name) html += dirIcon + ' <strong>' + esc(wt.name) + '</strong>';
+            if (wt.branch) html += ' &nbsp;&#127807; <span style="color:var(--accent)">' + esc(wt.branch) + '</span>';
+            html += '</div>';
         }
-        html += '<div>Iteration: '+r.iteration+' &bull; '+r.agent_count+' agents completed</div>';
+
+        // Work item hierarchy
+        if (r.hierarchy) {
+            var h = r.hierarchy;
+            html += '<div style="margin-bottom:8px">';
+            var focusStateClass = h.focus.state === 'Done' ? 'done-ct' : (h.focus.state === 'Doing' ? 'doing-ct' : 'todo-ct');
+            html += '<div style="font-size:0.85rem;margin-bottom:4px"><strong>' + esc(h.focus.type) + ' #' + esc(String(h.focus.id)) + '</strong> ';
+            html += '<span class="' + focusStateClass + '">' + esc(h.focus.state) + '</span>';
+            html += ' &mdash; ' + esc(h.focus.title) + '</div>';
+            for (var lv = 0; lv < h.levels.length; lv++) {
+                var level = h.levels[lv];
+                var total = level.total || 1;
+                var donePct = Math.round((level.Done / total) * 100);
+                var doingPct = Math.round((level.Doing / total) * 100);
+                var todoPct = 100 - donePct - doingPct;
+                html += '<div style="display:flex;align-items:center;gap:6px;font-size:0.8rem;margin-bottom:2px">';
+                html += '<span style="min-width:40px;color:var(--text2)">' + esc(level.type) + '</span>';
+                html += '<span class="hierarchy-bar" style="flex:1;max-width:200px" title="' + level.Done + ' Done, ' + level.Doing + ' Doing, ' + level['To Do'] + ' To Do">';
+                if (level.Done > 0) html += '<span class="seg seg-done" style="width:' + donePct + '%"></span>';
+                if (level.Doing > 0) html += '<span class="seg seg-doing" style="width:' + doingPct + '%"></span>';
+                if (level['To Do'] > 0) html += '<span class="seg seg-todo" style="width:' + todoPct + '%"></span>';
+                html += '</span>';
+                html += '<span style="color:var(--text2)">' + level.Done + '/' + total + ' done</span>';
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+
+        // Composition tree (active child workflows)
         html += compositionTreeHtml(r);
+
+        // Dashboard link + replay (compact footer)
         if (r.dashboard_url) {
-            html += '<div style="margin-top:4px"><a class="action-btn" href="'+esc(r.dashboard_url)+'" target="_blank" title="Open per-run conductor dashboard" style="text-decoration:none;display:inline-block">&#128279; Dashboard :'+r.dashboard_port+'</a></div>';
+            html += '<div style="margin-top:6px"><a class="action-btn" href="'+esc(r.dashboard_url)+'" target="_blank" title="Open per-run conductor dashboard" style="text-decoration:none;display:inline-block">&#128279; Dashboard :'+r.dashboard_port+'</a></div>';
         }
         html += '<div style="margin-top:4px"><code class="replay-cmd">'+esc(r.replay_cmd)+'</code></div>';
         html += '</div></div>';
