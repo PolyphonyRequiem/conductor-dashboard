@@ -2074,9 +2074,9 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
 
     worktree = _detect_worktree(cwd, worktree_cache)
 
-    # Load twig work item hierarchy for twig-sdlc runs
+    # Load twig work item hierarchy for any run with a work_item_id
     hierarchy = None
-    if r.work_item_id and wf_name.startswith("twig-sdlc"):
+    if r.work_item_id:
         for prefix, db_path in TWIG_DB_PATHS.items():
             if wf_name.startswith(prefix):
                 hierarchy = _load_twig_hierarchy(r.work_item_id, db_path)
