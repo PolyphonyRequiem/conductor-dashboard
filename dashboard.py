@@ -2169,17 +2169,19 @@ def _compute_dashboard() -> dict:
     for wid, group in wid_groups.items():
         if len(group) < 2:
             continue
-        # Pick root: prefer latest twig-sdlc run, else latest run overall
-        # (group is already sorted newest-first from sorted_runs)
-        root = None
-        for sr in group:
-            if "twig-sdlc" in (sr.get("name") or ""):
-                root = sr
-                break
-        if root is None:
-            root = group[0]
+        # Pick root: prefer twig-sdlc, then prefer running over terminal,
+        # then newest. This prevents a completed run from being root while
+        # a sibling is still running (which would hide live work).
+        def _root_sort_key(sr: dict) -> tuple:
+            is_sdlc = 0 if "twig-sdlc" in (sr.get("name") or "") else 1
+            status_pri = _STATUS_PRIORITY.get(sr.get("status", "unknown"), 3)
+            started = -(sr.get("started_at") or 0)  # newest first
+            return (is_sdlc, status_pri, started)
 
-        children = [sr for sr in group if sr is not root]
+        group.sort(key=_root_sort_key)
+        root = group[0]
+
+        children = group[1:]
         # Sort children chronologically (oldest first)
         children.sort(key=lambda sr: sr.get("started_at") or 0)
         for child in children:
@@ -2189,6 +2191,9 @@ def _compute_dashboard() -> dict:
         # Aggregate tree metrics
         root["tree_total_cost"] = root["total_cost"] + sum(c["total_cost"] for c in children)
         root["tree_total_tokens"] = root["total_tokens"] + sum(c["total_tokens"] for c in children)
+        # Tree status: worst-of across all runs (running > failed > completed)
+        worst = min(_STATUS_PRIORITY.get(sr.get("status", "unknown"), 3) for sr in group)
+        root["tree_status"] = {0: "running", 1: "failed", 2: "completed"}.get(worst, "unknown")
 
     # Filter out children from top-level lists
     def _not_child(sr: dict) -> bool:
