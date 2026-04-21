@@ -82,6 +82,8 @@ class WorkflowRun:
     work_item_type: str = ""
     # Inline subworkflow tracking
     subworkflows: list[dict] = field(default_factory=list)
+    # Workflow metadata from YAML/CLI (passed through workflow_started event)
+    metadata: dict = field(default_factory=dict)
     # Liveness signals
     tool_in_flight: bool = False  # last tool event was agent_tool_start with no matching complete
     last_event_ts: float = 0.0    # timestamp of the most recent event parsed
@@ -265,6 +267,7 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         run.version = data.get("version", "")
                         run.started_at = ts
                         run.agent_defs = data.get("agents", [])
+                        run.metadata = data.get("metadata", {})
                         for ad in run.agent_defs:
                             agent_type_map[ad.get("name", "")] = ad.get("type", "agent")
                     wf_depth += 1
@@ -451,6 +454,10 @@ def _load_event_logs() -> list[WorkflowRun]:
     for p in sorted(CONDUCTOR_DIR.glob("*.events.jsonl")):
         run = _parse_event_log(p)
         if run.status == "invalid":
+            continue
+
+        # Skip runs that declare themselves hidden via metadata
+        if run.metadata.get("dashboard_hidden"):
             continue
 
         # Fix #1: if an alive PID file matches this run, force status=running
