@@ -2169,14 +2169,13 @@ def _compute_dashboard() -> dict:
     for wid, group in wid_groups.items():
         if len(group) < 2:
             continue
-        # Pick root: prefer twig-sdlc, then prefer running over terminal,
-        # then newest. This prevents a completed run from being root while
-        # a sibling is still running (which would hide live work).
+        # Pick root: prefer running over terminal, then newest.
+        # This prevents a completed run from being root while a sibling
+        # is still running (which would hide live work).
         def _root_sort_key(sr: dict) -> tuple:
-            is_sdlc = 0 if "twig-sdlc" in (sr.get("name") or "") else 1
             status_pri = _STATUS_PRIORITY.get(sr.get("status", "unknown"), 3)
             started = -(sr.get("started_at") or 0)  # newest first
-            return (is_sdlc, status_pri, started)
+            return (status_pri, started)
 
         group.sort(key=_root_sort_key)
         root = group[0]
