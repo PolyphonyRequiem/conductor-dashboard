@@ -240,6 +240,7 @@ def _parse_event_log(path: Path) -> WorkflowRun:
     pending_gates: set[str] = set()
     active_agent: str = ""
     completed_agents: set[str] = set()
+    wf_depth: int = 0  # track nested workflow_started depth
 
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -256,12 +257,17 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                 data = evt.get("data", {})
 
                 if etype == "workflow_started":
-                    run.name = data.get("name", run.name)
-                    run.version = data.get("version", "")
-                    run.started_at = ts
-                    run.agent_defs = data.get("agents", [])
-                    for ad in run.agent_defs:
-                        agent_type_map[ad.get("name", "")] = ad.get("type", "agent")
+                    # Only use the FIRST workflow_started — subsequent ones
+                    # are inline subworkflows that shouldn't override the
+                    # outer workflow's identity.
+                    if wf_depth == 0:
+                        run.name = data.get("name", run.name)
+                        run.version = data.get("version", "")
+                        run.started_at = ts
+                        run.agent_defs = data.get("agents", [])
+                        for ad in run.agent_defs:
+                            agent_type_map[ad.get("name", "")] = ad.get("type", "agent")
+                    wf_depth += 1
 
                 elif etype == "agent_started":
                     if not run.started_at:
@@ -317,15 +323,19 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                     pending_gates.discard(data.get("agent_name", ""))
 
                 elif etype == "workflow_completed":
-                    run.status = "completed"
-                    run.ended_at = ts
+                    wf_depth = max(0, wf_depth - 1)
+                    if wf_depth == 0:
+                        run.status = "completed"
+                        run.ended_at = ts
 
                 elif etype == "workflow_failed":
-                    run.status = "failed"
-                    run.ended_at = ts
-                    run.error_type = data.get("error_type", "")
-                    run.error_message = data.get("message", "")
-                    run.failed_agent = data.get("agent_name", "")
+                    wf_depth = max(0, wf_depth - 1)
+                    if wf_depth == 0:
+                        run.status = "failed"
+                        run.ended_at = ts
+                        run.error_type = data.get("error_type", "")
+                        run.error_message = data.get("message", "")
+                        run.failed_agent = data.get("agent_name", "")
 
                 elif etype == "route_taken":
                     run.routes.append(data)
