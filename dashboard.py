@@ -2026,14 +2026,18 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
     # A run is "alive" if either:
     #   (a) its per-run dashboard port is currently listening (ts_to_port hit), OR
     #   (b) a registered PID file matches (backgrounded --web-bg runs), OR
-    #   (c) the dashboard parser force-marked it running via the tool_in_flight
-    #       grace window (foreground run still producing events).
+    #   (c) the log file was recently modified — the most reliable signal for
+    #       foreground runs where there's no port or PID file.
     process_alive = bool(dashboard_port) or any(
         _pid_matches_run(a, r) for a in alive_pid_runs
     )
-    if not process_alive and r.tool_in_flight and r.last_event_ts:
-        if (time.time() - r.last_event_ts) < 600:
-            process_alive = True
+    if not process_alive and r.last_event_ts:
+        try:
+            mtime = Path(r.log_file).stat().st_mtime
+            if (time.time() - mtime) < 300:  # 5 min, same as parser
+                process_alive = True
+        except OSError:
+            pass
 
     # Build work item URL
     work_item_url = ""
