@@ -2202,13 +2202,23 @@ def _compute_dashboard() -> dict:
         root = group[0]
 
         children = group[1:]
-        # Sort children chronologically (oldest first)
-        children.sort(key=lambda sr: sr.get("started_at") or 0)
+        # Deduplicate: for each workflow name, keep only the latest run
+        # (newest first since group was sorted). Earlier failed retries are noise.
+        seen_names: set[str] = set()
+        deduped: list[dict] = []
+        for child in sorted(children, key=lambda sr: -(sr.get("started_at") or 0)):
+            name = child.get("name", "")
+            if name not in seen_names:
+                seen_names.add(name)
+                deduped.append(child)
+        # Sort survivors chronologically (oldest first)
+        deduped.sort(key=lambda sr: sr.get("started_at") or 0)
+
         for child in children:
             child["is_child"] = True
             child_log_files.add(child["log_file"])
-        root["children"] = children
-        # Aggregate tree metrics
+        root["children"] = deduped
+        # Aggregate tree metrics (across ALL runs, not just deduped display)
         root["tree_total_cost"] = root["total_cost"] + sum(c["total_cost"] for c in children)
         root["tree_total_tokens"] = root["total_tokens"] + sum(c["total_tokens"] for c in children)
         # Tree status: worst-of across all runs (running > failed > completed)
