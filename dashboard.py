@@ -1365,23 +1365,43 @@ function renderRunCard(r, i, keyPrefix) {
             agentStatus = '<span style="color:var(--text2)">\\u2014</span>';
         }
 
-        var wiHtml = workItemHtml(r);
+        // Composition breadcrumb (show active subworkflow chain)
+        var subBreadcrumb = '';
+        if (r.subworkflows && r.subworkflows.length > 0) {
+            var running = r.subworkflows.filter(function(s) { return s.status === 'running'; });
+            if (running.length > 0) {
+                var last = running[running.length - 1];
+                var swName = last.workflow.replace('./', '').replace('.yaml', '');
+                subBreadcrumb = ' <span style="color:var(--text2)">\\u203A</span> <span style="color:var(--accent);font-size:0.8rem">' + esc(swName) + '</span>';
+            }
+        }
+
         var wtHtml = worktreeBadge(r);
-        var hiHtml = hierarchyHtml(r);
-        var wiBadge = (wiHtml ? ' '+wiHtml : '') + wtHtml + hiHtml;
 
         var html = '<div class="run-card fade-in'+gateClass+'">';
+
+        // --- Row 1: Workflow identity + runtime info ---
         html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+jsEsc(key)+'\\') ">';
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
-        html += '<span class="wf-name">'+esc(r.name)+'</span>'+wiBadge;
+        html += '<span class="wf-name">'+esc(r.name)+'</span>' + subBreadcrumb;
+        html += wtHtml;
         html += '<span style="color:var(--text2);margin-left:auto">'+esc(r.elapsed)+'</span>';
         html += '<span>'+agentStatus+'</span>';
-        var costDisplay = fmtCost(r.total_cost);
-        html += '<span>'+costDisplay+'</span>';
+        html += '<span>'+fmtCost(r.total_cost)+'</span>';
         if (r.dashboard_url) {
             html += '<a class="action-btn" href="'+esc(r.dashboard_url)+'" target="_blank" title="Open per-run conductor dashboard" onclick="event.stopPropagation()" style="margin-left:8px;text-decoration:none">&#128279; Dashboard</a>';
         }
         html += '</div>';
+
+        // --- Row 2: Work item info + hierarchy (always visible, not in expandable body) ---
+        var wiHtml = workItemHtml(r);
+        var hiHtml = hierarchyHtml(r);
+        if (wiHtml || hiHtml) {
+            html += '<div style="display:flex;align-items:center;gap:8px;padding:2px 12px 6px 32px;font-size:0.82rem;flex-wrap:wrap">';
+            if (wiHtml) html += wiHtml;
+            if (hiHtml) html += hiHtml;
+            html += '</div>';
+        }
 
         // Expanded body — focused on context, not agent minutiae
         html += '<div class="run-card-body'+(isExpanded?' open':'')+'">';
