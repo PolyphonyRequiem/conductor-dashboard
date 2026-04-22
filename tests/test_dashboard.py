@@ -388,10 +388,12 @@ class TestTsToStr:
     """Tests for _ts_to_str."""
 
     def test_valid_timestamp(self):
-        # 2025-01-01 00:00:00 UTC
+        from datetime import datetime
         result = _ts_to_str(1735689600.0)
-        assert "2025-01-01" in result
-        assert "UTC" in result
+        # Should match local time rendering of this epoch
+        expected = datetime.fromtimestamp(1735689600.0).strftime("%Y-%m-%d %H:%M:%S")
+        assert result == expected
+        assert "UTC" not in result
 
     def test_zero_returns_dash(self):
         assert _ts_to_str(0) == "—"

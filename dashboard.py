@@ -882,7 +882,7 @@ def _ts_to_str(ts: float) -> str:
     if not ts:
         return "—"
     try:
-        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return "—"
 
