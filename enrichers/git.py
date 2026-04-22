@@ -74,8 +74,24 @@ def clear_cache() -> None:
 # Enricher interface
 # ---------------------------------------------------------------------------
 def enrich(run: Any, metadata: dict, ctx: Any) -> dict:
-    """Return worktree info for the run's working directory."""
-    worktree = _detect_worktree(ctx.cwd)
+    """Return worktree info for the run's working directory.
+
+    If metadata declares worktree_name (e.g. "twig2-{work_item_id}"),
+    resolve the CWD from that pattern first — more reliable than
+    parsing file paths from log events.
+    """
+    cwd = ctx.cwd
+
+    # Use metadata worktree_name pattern if available
+    wt_pattern = metadata.get("worktree_name")
+    if wt_pattern and hasattr(run, "work_item_id") and run.work_item_id:
+        wt_name = wt_pattern.replace("{work_item_id}", run.work_item_id)
+        wt_name = wt_name.replace("{workflow_name}", getattr(run, "name", ""))
+        candidate = Path.home() / "projects" / wt_name
+        if candidate.exists():
+            cwd = candidate
+
+    worktree = _detect_worktree(cwd)
     if worktree:
         return {"worktree": worktree}
     return {}
