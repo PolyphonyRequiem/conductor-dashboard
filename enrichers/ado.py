@@ -73,22 +73,30 @@ def _resolve_twig_db(cwd: Path, metadata: dict) -> Path | None:
         import re
         m = re.search(r"dev\.azure\.com/([^/]+)/([^/]+)", metadata["project_url"])
         if m:
-            # Check per-repo first (cwd/.twig/{org}/{project})
-            local_db = cwd / ".twig" / m.group(1) / m.group(2) / "twig.db"
-            if local_db.exists():
-                result = local_db
-            else:
-                # Check main worktree
+            org, project = m.group(1), m.group(2)
+            # Check git_repo path first (the main repo where .twig/ lives)
+            git_repo = metadata.get("git_repo")
+            if git_repo:
+                repo_db = Path(git_repo) / ".twig" / org / project / "twig.db"
+                if repo_db.exists():
+                    result = repo_db
+            # Check per-repo (cwd/.twig/{org}/{project})
+            if result is None:
+                local_db = cwd / ".twig" / org / project / "twig.db"
+                if local_db.exists():
+                    result = local_db
+            # Check main worktree (via git)
+            if result is None:
                 main_tree = _find_main_worktree(cwd)
                 if main_tree and main_tree != cwd:
-                    wt_db = main_tree / ".twig" / m.group(1) / m.group(2) / "twig.db"
+                    wt_db = main_tree / ".twig" / org / project / "twig.db"
                     if wt_db.exists():
                         result = wt_db
-                # Fall back to global ~/.twig/{org}/{project}
-                if result is None:
-                    global_db = Path.home() / ".twig" / m.group(1) / m.group(2) / "twig.db"
-                    if global_db.exists():
-                        result = global_db
+            # Fall back to global ~/.twig/{org}/{project}
+            if result is None:
+                global_db = Path.home() / ".twig" / org / project / "twig.db"
+                if global_db.exists():
+                    result = global_db
 
     # No metadata or project_url didn't resolve → try CWD-based discovery
     if result is None:

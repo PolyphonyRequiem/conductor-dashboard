@@ -281,8 +281,9 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         for ad in run.agent_defs:
                             agent_type_map[ad.get("name", "")] = ad.get("type", "agent")
                         # Early work_item_id from metadata (injected at invocation time)
-                        if not run.work_item_id and run.metadata.get("input_work_item_id"):
-                            run.work_item_id = str(run.metadata["input_work_item_id"])
+                        mid = run.metadata.get("workitem_id") or run.metadata.get("input_work_item_id")
+                        if not run.work_item_id and mid:
+                            run.work_item_id = str(mid)
                     wf_depth += 1
 
                 elif etype == "agent_started":
