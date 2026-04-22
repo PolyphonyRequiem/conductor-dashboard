@@ -9,15 +9,19 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-# Module-level cache shared across enricher calls within one dashboard refresh.
-_worktree_cache: dict[str, dict] = {}
+# Module-level cache: cwd -> (timestamp, result).
+# Kept across refreshes with a TTL since worktree data is mostly stable.
+_worktree_cache: dict[str, tuple[float, dict]] = {}
+_WORKTREE_TTL = 300  # 5 minutes — worktree data is very stable
 
 
 def _detect_worktree(cwd: Path) -> dict:
     """Return info about the git worktree covering *cwd*."""
+    import time as _time
     key = str(cwd)
-    if key in _worktree_cache:
-        return _worktree_cache[key]
+    cached = _worktree_cache.get(key)
+    if cached and (_time.time() - cached[0]) < _WORKTREE_TTL:
+        return cached[1]
 
     info: dict = {}
     try:
@@ -26,11 +30,11 @@ def _detect_worktree(cwd: Path) -> dict:
             capture_output=True, text=True, timeout=1.5,
         )
         if top.returncode != 0:
-            _worktree_cache[key] = info
+            _worktree_cache[key] = (_time.time(), info)
             return info
         toplevel = top.stdout.strip()
         if not toplevel:
-            _worktree_cache[key] = info
+            _worktree_cache[key] = (_time.time(), info)
             return info
         br = subprocess.run(
             ["git", "-C", str(cwd), "rev-parse", "--abbrev-ref", "HEAD"],
@@ -61,12 +65,12 @@ def _detect_worktree(cwd: Path) -> dict:
         }
     except Exception:
         info = {}
-    _worktree_cache[key] = info
+    _worktree_cache[key] = (_time.time(), info)
     return info
 
 
 def clear_cache() -> None:
-    """Clear the worktree cache (called between dashboard refreshes)."""
+    """Clear the worktree cache."""
     _worktree_cache.clear()
 
 

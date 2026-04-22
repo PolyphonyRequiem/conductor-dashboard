@@ -478,6 +478,10 @@ def _pid_matches_run(active: "ActiveRun", run: WorkflowRun) -> bool:
     return abs(pid_epoch - run.started_at) < 5.0
 
 
+# Cache parsed event logs: path -> (mtime, size, WorkflowRun)
+_parsed_log_cache: dict[str, tuple[float, int, WorkflowRun]] = {}
+
+
 def _load_event_logs() -> list[WorkflowRun]:
     runs: list[WorkflowRun] = []
     if not CONDUCTOR_DIR.exists():
@@ -486,7 +490,27 @@ def _load_event_logs() -> list[WorkflowRun]:
     active_runs = [a for a in _load_active_runs() if a.alive]
     now = time.time()
     for p in sorted(CONDUCTOR_DIR.glob("*.events.jsonl")):
-        run = _parse_event_log(p)
+        # Use cached parse result if file hasn't changed
+        key = str(p)
+        try:
+            st = p.stat()
+            cached = _parsed_log_cache.get(key)
+            if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
+                run = cached[2]
+                # Re-evaluate mtime-based status for cached runs
+                recently_modified = (now - st.st_mtime) < 300
+                if run.status == "unknown":
+                    run.status = "running" if recently_modified else "interrupted"
+                elif recently_modified and run.status in ("failed", "completed"):
+                    if run.ended_at and (st.st_mtime - run.ended_at > 30):
+                        run.status = "running"
+            else:
+                run = _parse_event_log(p)
+                # Cache terminal runs (won't change) and running ones (will be re-checked via mtime)
+                _parsed_log_cache[key] = (st.st_mtime, st.st_size, run)
+        except OSError:
+            run = _parse_event_log(p)
+
         if run.status == "invalid":
             continue
 
@@ -588,23 +612,55 @@ def _get_conductor_ports() -> dict[int, int]:
     return pid_to_port
 
 
+_port_cache: dict[str, int] | None = None
+_port_cache_time: float = 0
+_PORT_CACHE_TTL = 10  # seconds
+
+
 def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[str, int]:
     """Map run_ids to their conductor dashboard ports.
 
-    Probes /api/info first (exact run_id matching), falls back to
-    /api/state (name-based matching for old conductor versions).
+    Strategy:
+      1. Read PID files (fast, no HTTP) for run_id + port.
+      2. Only probe HTTP for remaining ports without PID matches.
+
+    Results are cached for 10 seconds to avoid repeated HTTP probing.
 
     Returns {run_id_or_name: port}. Prefers run_id when available.
-
-    *exclude_port* is the dashboard's own port, so it never probes itself.
     """
+    global _port_cache, _port_cache_time
+    now = time.time()
+    if _port_cache is not None and (now - _port_cache_time) < _PORT_CACHE_TTL:
+        return _port_cache
     import urllib.request
     result: dict[str, int] = {}
     listening = _get_listening_ports()
-    candidates = [p for p in listening if p > 49000 and p != exclude_port]
+    known_ports: set[int] = set()
+
+    # Fast path: use PID files which have run_id and port
+    if PID_DIR.exists():
+        for p in sorted(PID_DIR.glob("*.pid")):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+                port = data.get("port", 0)
+                if not port or port == exclude_port or port not in listening:
+                    continue
+                run_id = data.get("run_id", "")
+                wf_name = data.get("workflow", "")
+                if wf_name:
+                    wf_name = Path(wf_name).stem
+                if run_id:
+                    result[run_id] = port
+                elif wf_name:
+                    result[wf_name] = port
+                known_ports.add(port)
+            except Exception:
+                continue
+
+    # Slow path: probe remaining high ports not covered by PID files
+    candidates = [p for p in listening if p > 49000 and p != exclude_port and p not in known_ports]
     for port in candidates:
         try:
-            # Try /api/info first (new conductor with run_id support)
             req = urllib.request.Request(
                 f"http://127.0.0.1:{port}/api/info",
                 headers={"User-Agent": "conductor-dashboard-probe"},
@@ -622,7 +678,6 @@ def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[str, int]
         except Exception:
             pass
         try:
-            # Fallback: /api/state (old conductor without /api/info)
             req = urllib.request.Request(
                 f"http://127.0.0.1:{port}/api/state",
                 headers={"User-Agent": "conductor-dashboard-probe"},
@@ -651,6 +706,8 @@ def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[str, int]
                             result[wf_name] = port
         except Exception:
             pass
+    _port_cache = result
+    _port_cache_time = time.time()
     return result
 
 
@@ -2084,18 +2141,9 @@ def _compute_dashboard(reviewed_set: set[str] | None = None) -> dict:
     name_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
     alive_pid_runs = [a for a in _load_active_runs() if a.alive]
 
-    # Clear enricher caches between refreshes
-    try:
-        from enrichers.git import clear_cache as clear_git_cache
-        clear_git_cache()
-    except ImportError:
-        pass
-    try:
-        from enrichers.ado import clear_db_cache
-        clear_db_cache()
-    except ImportError:
-        pass
-    _cwd_cache.clear()
+    # Enricher caches use TTLs — no need to clear between refreshes.
+    # Git worktree cache: 60s TTL. ADO DB path cache: persistent (path→DB is stable).
+    # CWD cache: persistent (log file→CWD is stable).
 
     sorted_runs = sorted(runs, key=lambda r: r.started_at or 0, reverse=True)
 
@@ -2290,7 +2338,7 @@ def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             checked = 0
             for line in f:
-                if checked > 400:  # scan enough lines to get past setup events
+                if checked > 80:  # first tool calls appear early; deeper scanning has diminishing returns
                     break
                 checked += 1
                 line = line.strip()
