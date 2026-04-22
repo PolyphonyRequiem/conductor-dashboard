@@ -1911,6 +1911,18 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     # Check if closeout-filing skill is available for review
     wf_name = r.name or ""
     cwd = _resolve_workflow_dir(r.log_file, wf_name)
+
+    # Override CWD with worktree_name pattern if metadata provides one.
+    # This gives enrichers a reliable CWD even before tool calls appear
+    # in the log (which _resolve_workflow_dir relies on).
+    wt_pattern = r.metadata.get("worktree_name")
+    if wt_pattern and r.work_item_id:
+        wt_name = wt_pattern.replace("{work_item_id}", r.work_item_id)
+        wt_name = wt_name.replace("{workflow_name}", wf_name)
+        wt_candidate = Path.home() / "projects" / wt_name
+        if wt_candidate.exists():
+            cwd = wt_candidate
+
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
     review_available = skill_path.exists()
 
@@ -1995,10 +2007,15 @@ def _compute_dashboard() -> dict:
     name_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
     alive_pid_runs = [a for a in _load_active_runs() if a.alive]
 
-    # Clear git worktree cache between refreshes
+    # Clear enricher caches between refreshes
     try:
         from enrichers.git import clear_cache as clear_git_cache
         clear_git_cache()
+    except ImportError:
+        pass
+    try:
+        from enrichers.ado import clear_db_cache
+        clear_db_cache()
     except ImportError:
         pass
 
