@@ -300,4 +300,51 @@ def enrich(run: Any, metadata: dict, ctx: Any) -> dict:
         if hierarchy:
             result["hierarchy"] = hierarchy
 
+    # If we have a work_item_id but no title yet, try twig CLI
+    if not run.work_item_title:
+        twig_info = _twig_show(wid, ctx.cwd)
+        if twig_info:
+            result["twig_title"] = twig_info.get("title", "")
+            result["twig_type"] = twig_info.get("type", "")
+            result["twig_state"] = twig_info.get("state", "")
+
     return result
+
+
+# ---------------------------------------------------------------------------
+# Twig CLI fallback
+# ---------------------------------------------------------------------------
+_twig_cache: dict[str, tuple[float, dict | None]] = {}
+_TWIG_CLI_TTL = 60  # seconds
+
+
+def _twig_show(work_item_id: str, cwd: Path) -> dict | None:
+    """Fetch work item info via twig CLI (cached)."""
+    import subprocess
+
+    cache_key = work_item_id
+    now = time.time()
+    cached = _twig_cache.get(cache_key)
+    if cached and (now - cached[0]) < _TWIG_CLI_TTL:
+        return cached[1]
+
+    try:
+        proc = subprocess.run(
+            ["twig", "show", work_item_id, "--no-refresh", "--output", "json"],
+            capture_output=True, text=True, timeout=5, cwd=str(cwd),
+        )
+        if proc.returncode == 0:
+            import json
+            data = json.loads(proc.stdout)
+            info = {
+                "title": data.get("title", ""),
+                "type": data.get("type", ""),
+                "state": data.get("state", ""),
+            }
+            _twig_cache[cache_key] = (now, info)
+            return info
+    except Exception:
+        pass
+
+    _twig_cache[cache_key] = (now, None)
+    return None

@@ -280,6 +280,9 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         run.run_id = data.get("run_id", "")
                         for ad in run.agent_defs:
                             agent_type_map[ad.get("name", "")] = ad.get("type", "agent")
+                        # Early work_item_id from metadata (injected at invocation time)
+                        if not run.work_item_id and run.metadata.get("input_work_item_id"):
+                            run.work_item_id = str(run.metadata["input_work_item_id"])
                     wf_depth += 1
 
                 elif etype == "agent_started":
@@ -2071,18 +2074,28 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
             ],
         }
 
-    cwd = _resolve_workflow_dir(r.log_file, wf_name)
+    cwd: Path = Path.home()
 
-    # Override CWD with worktree_name pattern if metadata provides one.
-    # This gives enrichers a reliable CWD even before tool calls appear
-    # in the log (which _resolve_workflow_dir relies on).
-    wt_pattern = r.metadata.get("worktree_name")
-    if wt_pattern and r.work_item_id:
-        wt_name = wt_pattern.replace("{work_item_id}", r.work_item_id)
-        wt_name = wt_name.replace("{workflow_name}", wf_name)
-        wt_candidate = Path.home() / "projects" / wt_name
-        if wt_candidate.exists():
-            cwd = wt_candidate
+    # Best: metadata.cwd injected at invocation time
+    meta_cwd = r.metadata.get("cwd")
+    if meta_cwd:
+        p = Path(meta_cwd.replace("/", os.sep))
+        if p.exists():
+            cwd = p
+
+    # Fallback: worktree_name pattern from metadata
+    if cwd == Path.home():
+        wt_pattern = r.metadata.get("worktree_name")
+        if wt_pattern and r.work_item_id:
+            wt_name = wt_pattern.replace("{work_item_id}", r.work_item_id)
+            wt_name = wt_name.replace("{workflow_name}", wf_name)
+            wt_candidate = Path.home() / "projects" / wt_name
+            if wt_candidate.exists():
+                cwd = wt_candidate
+
+    # Last resort: scan log file for file paths
+    if cwd == Path.home():
+        cwd = _resolve_workflow_dir(r.log_file, wf_name)
 
     skill_path = cwd / ".github" / "skills" / "closeout-filing" / "SKILL.md"
     review_available = skill_path.exists()
@@ -2131,8 +2144,8 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
         "iteration": r.iteration,
         "purpose": r.purpose,
         "work_item_id": r.work_item_id,
-        "work_item_title": r.work_item_title,
-        "work_item_type": r.work_item_type,
+        "work_item_title": r.work_item_title or ado_data.get("twig_title", ""),
+        "work_item_type": r.work_item_type or ado_data.get("twig_type", ""),
         "work_item_url": ado_data.get("work_item_url", ""),
         "run_id": r.run_id,
         "metadata": r.metadata,
