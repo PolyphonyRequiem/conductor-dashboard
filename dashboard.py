@@ -1206,17 +1206,21 @@ function hierarchyHtml(r) {
     if (!h || !h.focus) return '';
     var html = '<span class="hierarchy">';
 
-    // Show ancestor chain if focus is not a top-level item
+    // Show ancestor chain if focus is not a top-level item (e.g. "Epic › Issue")
     if (h.ancestors && h.ancestors.length > 0) {
         for (var a = h.ancestors.length - 1; a >= 0; a--) {
             var anc = h.ancestors[a];
             var ancClass = anc.state === 'Done' ? 'done-ct' : (anc.state === 'Doing' ? 'doing-ct' : 'todo-ct');
             html += '<span class="hierarchy-focus"><span class="'+ancClass+'">' + esc(anc.type) + '</span> \\u203A </span>';
         }
+        // Show the focus item's state after the chain
+        var focusClass = h.focus.state === 'Done' ? 'done-ct' : (h.focus.state === 'Doing' ? 'doing-ct' : 'todo-ct');
+        html += '<span class="hierarchy-focus"><span class="'+focusClass+'">' + esc(h.focus.type) + ' (' + esc(h.focus.state) + ')</span></span>';
     }
 
     // Show child level progress bars if available
     if (h.levels && h.levels.length > 0) {
+        if (h.ancestors && h.ancestors.length > 0) html += ' ';
         for (var i = 0; i < h.levels.length; i++) {
             var lv = h.levels[i];
             var total = lv.total || 1;
@@ -1239,10 +1243,8 @@ function hierarchyHtml(r) {
             html += '</span></span>';
         }
     } else {
-        // No children — show the focus item state inline
-        var focusClass = h.focus.state === 'Done' ? 'done-ct' : (h.focus.state === 'Doing' ? 'doing-ct' : 'todo-ct');
-        html += '<span class="hierarchy-focus"><span class="'+focusClass+'">' + esc(h.focus.state) + '</span></span>';
-        html += '<span class="hierarchy-counts" style="opacity:0.6"> (no child items)</span>';
+        // No children
+        html += '<span style="color:var(--text2);opacity:0.7;font-size:0.78rem"> \\u2014 no child work items planned yet</span>';
     }
     html += '</span>';
     return html;
