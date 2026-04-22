@@ -1240,7 +1240,8 @@ function compositionTreeHtml(r) {
 // ---------------------------------------------------------------------------
 async function fetchDashboard() {
     try {
-        const resp = await fetch('/api/dashboard');
+        var reviewedParam = reviewedRuns.size > 0 ? '?reviewed=' + encodeURIComponent([...reviewedRuns].join(',')) : '';
+        const resp = await fetch('/api/dashboard' + reviewedParam);
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         previousData = dashboardData;
         dashboardData = await resp.json();
@@ -1885,15 +1886,17 @@ def _compute_status():
 
 
 @app.get("/api/dashboard")
-async def api_dashboard():
+async def api_dashboard(reviewed: str = ""):
     """Full dashboard data for AJAX frontend."""
     import asyncio
+    reviewed_set = set(reviewed.split(",")) if reviewed else set()
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _compute_dashboard)
+    return await loop.run_in_executor(None, lambda: _compute_dashboard(reviewed_set))
 
 
 def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
-                   alive_pid_runs: list["ActiveRun"] | None = None) -> dict:
+                   alive_pid_runs: list["ActiveRun"] | None = None,
+                   skip_enrichment: bool = False) -> dict:
     """Convert a WorkflowRun to a JSON-serializable dict."""
     if alive_pid_runs is None:
         alive_pid_runs = []
@@ -1923,6 +1926,67 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
 
     # Check if closeout-filing skill is available for review
     wf_name = r.name or ""
+
+    # Fast path: skip expensive CWD resolution and enrichers for runs
+    # the user has already reviewed or that are abandoned/interrupted.
+    if skip_enrichment:
+        return {
+            "log_file": r.log_file,
+            "name": r.name,
+            "started_at": r.started_at,
+            "started_at_str": _ts_to_str(r.started_at),
+            "ended_at": r.ended_at,
+            "ended_at_str": _ts_to_str(r.ended_at),
+            "elapsed": _duration_str(r.started_at, r.ended_at if r.status != "running" else time.time()),
+            "status": r.status,
+            "status_icon": STATUS_ICONS.get(r.status, "❓"),
+            "error_type": r.error_type,
+            "error_message": r.error_message,
+            "failed_agent": r.failed_agent,
+            "total_cost": r.total_cost,
+            "cost_str": f"${r.total_cost:.4f}" if r.total_cost else "—",
+            "total_tokens": r.total_tokens,
+            "tokens_str": f"{r.total_tokens:,}" if r.total_tokens else "—",
+            "agents": [
+                {"name": a.name, "model": a.model, "elapsed": a.elapsed,
+                 "tokens": a.tokens, "cost_usd": a.cost_usd}
+                for a in r.agents
+            ],
+            "agent_count": len(r.agents),
+            "current_agent": r.current_agent,
+            "current_agent_type": r.current_agent_type,
+            "gate_waiting": r.gate_waiting,
+            "gate_agent": r.gate_agent,
+            "iteration": r.iteration,
+            "purpose": r.purpose,
+            "work_item_id": r.work_item_id,
+            "work_item_title": r.work_item_title,
+            "work_item_type": r.work_item_type,
+            "work_item_url": "",
+            "run_id": r.run_id,
+            "metadata": r.metadata,
+            "dashboard_port": dashboard_port,
+            "dashboard_url": f"http://localhost:{dashboard_port}" if dashboard_port else "",
+            "replay_cmd": f'conductor replay "{r.log_file}" --web-bg',
+            "review_available": False,
+            "review_skill_path": "",
+            "cwd": "",
+            "worktree": {},
+            "process_alive": process_alive,
+            "hierarchy": None,
+            "subworkflows": [
+                {
+                    "workflow": sw["workflow"],
+                    "agent": sw["agent"],
+                    "item_key": sw["item_key"],
+                    "iteration": sw["iteration"],
+                    "status": sw["status"],
+                    "elapsed": sw["elapsed"],
+                }
+                for sw in r.subworkflows
+            ],
+        }
+
     cwd = _resolve_workflow_dir(r.log_file, wf_name)
 
     # Override CWD with worktree_name pattern if metadata provides one.
@@ -2011,7 +2075,7 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     }
 
 
-def _compute_dashboard() -> dict:
+def _compute_dashboard(reviewed_set: set[str] | None = None) -> dict:
     runs = _load_event_logs()
     checkpoints = _load_checkpoints()
     costs = _aggregate_costs(runs)
@@ -2035,7 +2099,19 @@ def _compute_dashboard() -> dict:
 
     sorted_runs = sorted(runs, key=lambda r: r.started_at or 0, reverse=True)
 
-    all_serialized = [_serialize_run(r, name_to_port, alive_pid_runs) for r in sorted_runs]
+    # Skip enrichment for reviewed runs and non-running interrupted/abandoned runs
+    if reviewed_set is None:
+        reviewed_set = set()
+
+    all_serialized = []
+    for r in sorted_runs:
+        skip = False
+        if r.log_file in reviewed_set:
+            skip = True
+        elif r.status not in ("running", "completed", "failed"):
+            # interrupted/invalid — skip enrichment
+            skip = True
+        all_serialized.append(_serialize_run(r, name_to_port, alive_pid_runs, skip_enrichment=skip))
 
     all_running = [sr for sr in all_serialized if sr["status"] == "running"]
     active_runs = [sr for sr in all_running if sr["process_alive"]]
