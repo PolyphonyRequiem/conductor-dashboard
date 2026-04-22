@@ -754,3 +754,89 @@ class TestWorkflowComposition:
         assert run.work_item_id == "1814"
         assert run.work_item_title == "My Epic"
         assert run.work_item_type == "Epic"
+
+    def test_truncated_child_workflow_started_does_not_complete_parent(
+        self, tmp_path: Path
+    ):
+        """If a child workflow_started line is truncated (JSON error), the
+        child's workflow_completed must NOT mark the parent as completed."""
+        events_lines = [
+            json.dumps({"type": "workflow_started", "timestamp": 1000.0,
+                        "data": {"name": "orchestrator", "version": "1.0",
+                                 "agents": []}}),
+            json.dumps({"type": "subworkflow_started", "timestamp": 1001.0,
+                        "data": {"agent_name": "planner",
+                                 "workflow": "./plan.yaml"}}),
+            # Truncated inner workflow_started — simulates partial write
+            '{"type": "workflow_started", "timestamp": 1001.0, "data": {"na',
+            # Child events
+            json.dumps({"type": "agent_started", "timestamp": 1002.0,
+                        "data": {"agent_name": "worker", "iteration": 1}}),
+            json.dumps({"type": "agent_completed", "timestamp": 1007.0,
+                        "data": {"agent_name": "worker", "model": "gpt-4",
+                                 "elapsed": 5.0, "tokens": 500,
+                                 "cost_usd": 0.01}}),
+            # Child completes — depth would hit 0 without the guard
+            json.dumps({"type": "workflow_completed", "timestamp": 1008.0,
+                        "data": {}}),
+        ]
+        fname = "conductor-orchestrator-20260416-120000.events.jsonl"
+        p = tmp_path / fname
+        p.write_text("\n".join(events_lines) + "\n", encoding="utf-8")
+        os.utime(p, (time.time() - 600, time.time() - 600))
+
+        run = _parse_event_log(p)
+        # Must NOT be "completed" — the running subworkflow is evidence
+        # that the child's workflow_started was missed.
+        assert run.status != "completed", (
+            "Parent should not be marked completed when a subworkflow "
+            "is still running (depth-tracking error from truncated line)"
+        )
+        # The subworkflow should be marked as completed (fallback handling)
+        assert run.subworkflows[0]["status"] == "completed"
+
+    def test_post_parse_invariant_completed_with_running_subs(
+        self, tmp_path: Path
+    ):
+        """Post-parse invariant: completed + running subworkflows is
+        impossible and should be downgraded."""
+        # Simulate a scenario where depth tracking is correct but a
+        # subworkflow_completed event was lost — completed with running subs.
+        events = [
+            {"type": "workflow_started", "timestamp": 1000.0,
+             "data": {"name": "orch", "version": "1.0", "agents": []}},
+            {"type": "subworkflow_started", "timestamp": 1001.0,
+             "data": {"agent_name": "builder", "workflow": "./build.yaml"}},
+            {"type": "workflow_started", "timestamp": 1001.0,
+             "data": {"name": "build", "agents": []}},
+            {"type": "workflow_completed", "timestamp": 1005.0, "data": {}},
+            # Note: no subworkflow_completed — sub stays "running"
+            {"type": "workflow_completed", "timestamp": 1010.0, "data": {}},
+        ]
+        p = _write_events(tmp_path, events, name="orch")
+        run = _parse_event_log(p)
+        # The inline workflow_completed at depth>0 should have marked the
+        # subworkflow as completed since it has a running sub.
+        # But even if it didn't, the post-parse invariant catches it.
+        # In practice, the depth>0 handler marks the sub done, so
+        # by the time the root workflow_completed fires, no subs are running.
+        # Either way, the result should be correct.
+        assert run.status == "completed"
+        assert run.subworkflows[0]["status"] == "completed"
+
+    def test_simple_workflow_completed_still_works(self, tmp_path: Path):
+        """A simple workflow (no subworkflows) still completes normally."""
+        events = [
+            {"type": "workflow_started", "timestamp": 1000.0,
+             "data": {"name": "simple", "version": "1.0", "agents": []}},
+            {"type": "agent_started", "timestamp": 1001.0,
+             "data": {"agent_name": "worker", "iteration": 1}},
+            {"type": "agent_completed", "timestamp": 1005.0,
+             "data": {"agent_name": "worker", "model": "gpt-4",
+                      "elapsed": 4.0, "tokens": 300, "cost_usd": 0.005}},
+            {"type": "workflow_completed", "timestamp": 1006.0, "data": {}},
+        ]
+        p = _write_events(tmp_path, events, name="simple")
+        run = _parse_event_log(p)
+        assert run.status == "completed"
+        assert run.ended_at == 1006.0

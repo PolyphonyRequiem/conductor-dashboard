@@ -6,3 +6,6 @@ __pycache__/
 dist/
 build/
 .env
+dashboard-current.png
+dashboard-viewport.png
+.playwright-mcp/

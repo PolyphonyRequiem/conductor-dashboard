@@ -250,6 +250,7 @@ def _parse_event_log(path: Path) -> WorkflowRun:
     active_agent: str = ""
     completed_agents: set[str] = set()
     wf_depth: int = 0  # track nested workflow_started depth
+    saw_json_error: bool = False  # evidence of partially-written log lines
 
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -260,6 +261,7 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                 try:
                     evt = json.loads(line)
                 except json.JSONDecodeError:
+                    saw_json_error = True
                     continue
                 etype = evt.get("type", "")
                 ts = evt.get("timestamp", 0)
@@ -336,7 +338,15 @@ def _parse_event_log(path: Path) -> WorkflowRun:
 
                 elif etype == "workflow_completed":
                     wf_depth = max(0, wf_depth - 1)
-                    if wf_depth == 0:
+                    # Guard against depth-tracking errors from partially-
+                    # written log files: if depth hits 0 but subworkflows
+                    # are still running, a child workflow_started was
+                    # likely truncated during a concurrent read — treat
+                    # as child completion, not root.
+                    has_running_subs = any(
+                        sw["status"] == "running" for sw in run.subworkflows
+                    )
+                    if wf_depth == 0 and not has_running_subs:
                         run.status = "completed"
                         run.ended_at = ts
                     else:
@@ -407,6 +417,16 @@ def _parse_event_log(path: Path) -> WorkflowRun:
     if pending_gates:
         run.gate_waiting = True
         run.gate_agent = next(iter(pending_gates))
+
+    # Post-parse invariant: "completed" is impossible while subworkflows are
+    # still running.  If we see this state it means depth tracking was thrown
+    # off by a partially-written log line (race between conductor writing and
+    # dashboard reading).  Reset to "unknown" and let the mtime classifier
+    # below decide running vs interrupted.
+    if run.status == "completed" and any(
+        sw["status"] == "running" for sw in run.subworkflows
+    ):
+        run.status = "unknown"
 
     # If no events parsed at all, this file isn't valid JSONL (may be a
     # conductor --log-file debug log that happens to have .events.jsonl extension)
