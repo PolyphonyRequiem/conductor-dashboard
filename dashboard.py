@@ -559,21 +559,19 @@ def _get_conductor_ports() -> dict[int, int]:
     return pid_to_port
 
 
-def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[float, int]:
-    """Map workflow start timestamps to their conductor dashboard ports.
+def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[str, int]:
+    """Map workflow names to their conductor dashboard ports.
 
-    Each conductor dashboard serves a unique run identified by its
-    workflow_started timestamp.  Returns {start_timestamp: port} for
-    1:1 matching against event log runs.
+    Each conductor dashboard serves a unique run. Returns
+    {workflow_name: port} for matching against event log runs.
 
     Skips ports whose workflow has already reached a terminal state
-    (workflow_completed or workflow_failed) — those are stale servers
-    that haven't shut down yet.
+    (workflow_completed or workflow_failed at depth 0).
 
     *exclude_port* is the dashboard's own port, so it never probes itself.
     """
     import urllib.request
-    ts_to_port: dict[float, int] = {}
+    name_to_port: dict[str, int] = {}
     listening = _get_listening_ports()
     candidates = [p for p in listening if p > 49000 and p != exclude_port]
     for port in candidates:
@@ -585,23 +583,32 @@ def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[float, in
             with urllib.request.urlopen(req, timeout=0.2) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
                 if isinstance(data, list):
-                    start_ts = 0
-                    last_event_type = ""
+                    wf_name = ""
+                    depth = 0
+                    terminal_at_root = False
                     for event in data:
                         if isinstance(event, dict):
                             etype = event.get("type", "")
                             if etype == "workflow_started":
-                                start_ts = event.get("timestamp", 0)
+                                if depth == 0:
+                                    wf_name = event.get("data", {}).get("name", "")
+                                depth += 1
+                            elif etype in ("workflow_completed", "workflow_failed"):
+                                depth = max(0, depth - 1)
+                                if depth == 0:
+                                    terminal_at_root = True
                             if etype:
-                                last_event_type = etype
-                    # Skip completed/failed workflows — stale servers
-                    if last_event_type in ("workflow_completed", "workflow_failed"):
+                                pass
+                    if terminal_at_root:
                         continue
-                    if start_ts:
-                        ts_to_port[start_ts] = port
+                    if wf_name:
+                        # Use name+port; if multiple runs share the same name,
+                        # keep the latest port (highest port = most recent).
+                        if wf_name not in name_to_port or port > name_to_port[wf_name]:
+                            name_to_port[wf_name] = port
         except Exception:
             pass
-    return ts_to_port
+    return name_to_port
 
 
 def _load_active_runs() -> list[ActiveRun]:
@@ -1829,27 +1836,17 @@ async def api_dashboard():
     return await loop.run_in_executor(None, _compute_dashboard)
 
 
-def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
+def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
                    alive_pid_runs: list["ActiveRun"] | None = None) -> dict:
     """Convert a WorkflowRun to a JSON-serializable dict."""
     if alive_pid_runs is None:
         alive_pid_runs = []
-    # Find matching dashboard port
-    dashboard_port = ts_to_port.get(r.started_at)
-    if not dashboard_port:
-        # Widen tolerance: the per-run dashboard starts after the workflow,
-        # especially for composed workflows where the child process spawns
-        # seconds to minutes after the parent's workflow_started event.
-        best_gap = float("inf")
-        for ts, port in ts_to_port.items():
-            gap = abs(ts - r.started_at)
-            if gap < 120 and gap < best_gap:
-                best_gap = gap
-                dashboard_port = port
+    # Find matching dashboard port by workflow name
+    dashboard_port = name_to_port.get(r.name)
 
     # Determine whether the backing conductor process is actually alive.
     # A run is "alive" if either:
-    #   (a) its per-run dashboard port is currently listening (ts_to_port hit), OR
+    #   (a) its per-run dashboard port is currently listening (name_to_port hit), OR
     #   (b) a registered PID file matches (backgrounded --web-bg runs), OR
     #   (c) the log file was recently modified — the most reliable signal for
     #       foreground runs where there's no port or PID file.
@@ -1946,7 +1943,7 @@ def _compute_dashboard() -> dict:
     costs = _aggregate_costs(runs)
     errors = _aggregate_errors(runs)
     metrics = _aggregate_metrics(runs)
-    ts_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
+    name_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
     alive_pid_runs = [a for a in _load_active_runs() if a.alive]
 
     # Clear git worktree cache between refreshes
@@ -1958,7 +1955,7 @@ def _compute_dashboard() -> dict:
 
     sorted_runs = sorted(runs, key=lambda r: r.started_at or 0, reverse=True)
 
-    all_serialized = [_serialize_run(r, ts_to_port, alive_pid_runs) for r in sorted_runs]
+    all_serialized = [_serialize_run(r, name_to_port, alive_pid_runs) for r in sorted_runs]
 
     all_running = [sr for sr in all_serialized if sr["status"] == "running"]
     active_runs = [sr for sr in all_running if sr["process_alive"]]

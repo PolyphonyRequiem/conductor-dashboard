@@ -481,21 +481,22 @@ class TestSerializeRun:
 
     def test_dashboard_port_exact_match(self):
         run = WorkflowRun(name="demo", started_at=5000.0, ended_at=5100.0, status="completed")
-        ts_to_port = {5000.0: 49999}
-        result = _serialize_run(run, ts_to_port)
+        name_to_port = {"demo": 49999}
+        result = _serialize_run(run, name_to_port)
         assert result["dashboard_port"] == 49999
         assert "49999" in result["dashboard_url"]
 
     def test_dashboard_port_fuzzy_match(self):
+        """Name-based matching: exact name match required."""
         run = WorkflowRun(name="demo", started_at=5000.0, ended_at=5100.0, status="completed")
-        ts_to_port = {5001.5: 50001}  # within 2s
-        result = _serialize_run(run, ts_to_port)
+        name_to_port = {"demo": 50001}
+        result = _serialize_run(run, name_to_port)
         assert result["dashboard_port"] == 50001
 
     def test_no_dashboard_port(self):
         run = WorkflowRun(name="demo", started_at=5000.0, ended_at=5100.0, status="completed")
-        ts_to_port = {9999.0: 50001}  # not within 2s
-        result = _serialize_run(run, ts_to_port)
+        name_to_port = {"other-workflow": 50001}
+        result = _serialize_run(run, name_to_port)
         assert result["dashboard_port"] is None
         assert result["dashboard_url"] == ""
 
