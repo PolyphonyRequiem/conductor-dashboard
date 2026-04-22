@@ -1837,10 +1837,15 @@ def _serialize_run(r: WorkflowRun, ts_to_port: dict[float, int],
     # Find matching dashboard port
     dashboard_port = ts_to_port.get(r.started_at)
     if not dashboard_port:
+        # Widen tolerance: the per-run dashboard starts after the workflow,
+        # especially for composed workflows where the child process spawns
+        # seconds to minutes after the parent's workflow_started event.
+        best_gap = float("inf")
         for ts, port in ts_to_port.items():
-            if abs(ts - r.started_at) < 2.0:
+            gap = abs(ts - r.started_at)
+            if gap < 120 and gap < best_gap:
+                best_gap = gap
                 dashboard_port = port
-                break
 
     # Determine whether the backing conductor process is actually alive.
     # A run is "alive" if either:
