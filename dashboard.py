@@ -1146,28 +1146,41 @@ function workItemHtml(r) {
 
 function hierarchyHtml(r) {
     var h = r.hierarchy;
-    if (!h || !h.levels || h.levels.length === 0) return '';
+    if (!h || !h.focus) return '';
     var html = '<span class="hierarchy">';
-    for (var i = 0; i < h.levels.length; i++) {
-        var lv = h.levels[i];
-        var total = lv.total || 1;
-        var donePct = Math.round((lv.Done / total) * 100);
-        var doingPct = Math.round((lv.Doing / total) * 100);
-        var todoPct = 100 - donePct - doingPct;
-        html += '<span class="hierarchy-level">';
-        html += '<span class="hierarchy-label">'+esc(lv.type)+':</span>';
-        html += '<span class="hierarchy-bar" title="'+lv.Done+' Done, '+lv.Doing+' Doing, '+(lv['To Do'])+' To Do">';
-        if (lv.Done > 0) html += '<span class="seg seg-done" style="width:'+donePct+'%"></span>';
-        if (lv.Doing > 0) html += '<span class="seg seg-doing" style="width:'+doingPct+'%"></span>';
-        if (lv['To Do'] > 0) html += '<span class="seg seg-todo" style="width:'+todoPct+'%"></span>';
-        html += '</span>';
-        html += '<span class="hierarchy-counts">';
-        var parts = [];
-        if (lv.Done > 0) parts.push('<span class="done-ct">'+lv.Done+'\\u2714</span>');
-        if (lv.Doing > 0) parts.push('<span class="doing-ct">'+lv.Doing+'\\u2699</span>');
-        if (lv['To Do'] > 0) parts.push('<span class="todo-ct">'+lv['To Do']+'\\u25cb</span>');
-        html += parts.join(' ');
-        html += '</span></span>';
+
+    // Show ancestor chain if focus is not a top-level item
+    if (h.ancestors && h.ancestors.length > 0) {
+        for (var a = h.ancestors.length - 1; a >= 0; a--) {
+            var anc = h.ancestors[a];
+            var ancClass = anc.state === 'Done' ? 'done-ct' : (anc.state === 'Doing' ? 'doing-ct' : 'todo-ct');
+            html += '<span class="hierarchy-focus"><span class="'+ancClass+'">' + esc(anc.type) + '</span> \\u203A </span>';
+        }
+    }
+
+    // Show child level progress bars if available
+    if (h.levels && h.levels.length > 0) {
+        for (var i = 0; i < h.levels.length; i++) {
+            var lv = h.levels[i];
+            var total = lv.total || 1;
+            var donePct = Math.round((lv.Done / total) * 100);
+            var doingPct = Math.round((lv.Doing / total) * 100);
+            var todoPct = 100 - donePct - doingPct;
+            html += '<span class="hierarchy-level">';
+            html += '<span class="hierarchy-label">'+esc(lv.type)+':</span>';
+            html += '<span class="hierarchy-bar" title="'+lv.Done+' Done, '+lv.Doing+' Doing, '+(lv['To Do'])+' To Do">';
+            if (lv.Done > 0) html += '<span class="seg seg-done" style="width:'+donePct+'%"></span>';
+            if (lv.Doing > 0) html += '<span class="seg seg-doing" style="width:'+doingPct+'%"></span>';
+            if (lv['To Do'] > 0) html += '<span class="seg seg-todo" style="width:'+todoPct+'%"></span>';
+            html += '</span>';
+            html += '<span class="hierarchy-counts">';
+            var parts = [];
+            if (lv.Done > 0) parts.push('<span class="done-ct">'+lv.Done+'\\u2714</span>');
+            if (lv.Doing > 0) parts.push('<span class="doing-ct">'+lv.Doing+'\\u2699</span>');
+            if (lv['To Do'] > 0) parts.push('<span class="todo-ct">'+lv['To Do']+'\\u25cb</span>');
+            html += parts.join(' ');
+            html += '</span></span>';
+        }
     }
     html += '</span>';
     return html;
@@ -2018,6 +2031,7 @@ def _compute_dashboard() -> dict:
         clear_db_cache()
     except ImportError:
         pass
+    _cwd_cache.clear()
 
     sorted_runs = sorted(runs, key=lambda r: r.started_at or 0, reverse=True)
 
@@ -2177,6 +2191,9 @@ async def action_restart(request: Request):
         return {"error": str(e)}
 
 
+_cwd_cache: dict[str, Path] = {}
+
+
 def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
     """Return the project directory a workflow was operating on.
 
@@ -2185,6 +2202,8 @@ def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
       2. Fall back to the static WORKFLOW_DIRS mapping.
       3. Fall back to HOME.
     """
+    if log_file in _cwd_cache:
+        return _cwd_cache[log_file]
     # 1. Dynamic: inspect the first tool calls for file path arguments.
     # Conductor stores `arguments` as either a dict OR a Python-repr string
     # (e.g. "{'command': 'cd C:\\\\Users\\\\...\\\\projects\\\\twig2-1643'}"),
@@ -2235,10 +2254,13 @@ def _resolve_workflow_dir(log_file: str, wf_name: str) -> Path:
     except Exception:
         pass
     if best_candidate is not None:
+        _cwd_cache[log_file] = best_candidate
         return best_candidate
 
     # 2. Fallback: HOME directory (no assumptions about which project)
-    return Path.home()
+    result = Path.home()
+    _cwd_cache[log_file] = result
+    return result
 
 
 def _extract_workflow_name(log_file: str) -> str:

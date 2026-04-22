@@ -168,6 +168,23 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
 
         focus = {"id": row[0], "type": row[1], "title": row[2], "state": row[3]}
 
+        # Walk UP to build ancestor chain (e.g., Task → Issue → Epic)
+        ancestors = []
+        parent_id = cur.execute(
+            "SELECT parent_id FROM work_items WHERE id = ?", (wid,)
+        ).fetchone()
+        parent_id = parent_id[0] if parent_id else None
+        while parent_id:
+            prow = cur.execute(
+                "SELECT id, type, title, state, parent_id FROM work_items WHERE id = ?",
+                (parent_id,)
+            ).fetchone()
+            if not prow:
+                break
+            ancestors.append({"id": prow[0], "type": prow[1], "title": prow[2], "state": prow[3]})
+            parent_id = prow[4]
+
+        # Walk DOWN to build child level breakdown
         rows = cur.execute("""
             WITH RECURSIVE descendants AS (
                 SELECT id, type, state FROM work_items WHERE parent_id = ?
@@ -206,7 +223,7 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
                     "total": total,
                 })
 
-        result = {"focus": focus, "levels": levels}
+        result = {"focus": focus, "levels": levels, "ancestors": ancestors}
     except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError):
         result = None
 
