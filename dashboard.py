@@ -83,6 +83,8 @@ class WorkflowRun:
     subworkflows: list[dict] = field(default_factory=list)
     # Workflow metadata from YAML/CLI (passed through workflow_started event)
     metadata: dict = field(default_factory=dict)
+    # Run identity (from conductor's event log subscriber)
+    run_id: str = ""
     # Liveness signals
     tool_in_flight: bool = False  # last tool event was agent_tool_start with no matching complete
     last_event_ts: float = 0.0    # timestamp of the most recent event parsed
@@ -226,14 +228,20 @@ def _extract_purpose(prompt: str, max_len: int = 120) -> str:
 def _parse_event_log(path: Path) -> WorkflowRun:
     run = WorkflowRun(log_file=str(path))
 
-    # Extract name & timestamp from filename pattern:
-    # conductor-{workflow-name}-{YYYYMMDD-HHMMSS}.events.jsonl
+    # Extract name & run_id from filename pattern:
+    # conductor-{workflow-name}-{YYYYMMDD-HHMMSS}-{run_id}.events.jsonl
     fname = path.stem  # strip .jsonl
     if fname.endswith(".events"):
         fname = fname[: -len(".events")]
-    m = re.match(r"conductor-(.+)-(\d{8}-\d{6})$", fname)
+    m = re.match(r"conductor-(.+)-(\d{8}-\d{6})-([a-f0-9]+)$", fname)
     if m:
         run.name = m.group(1)
+        run.run_id = m.group(3)
+    else:
+        # Fallback: old format without run_id suffix
+        m2 = re.match(r"conductor-(.+)-(\d{8}-\d{6})$", fname)
+        if m2:
+            run.name = m2.group(1)
 
     agents_map: dict[str, AgentRun] = {}
     # Track live execution state
@@ -267,6 +275,7 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         run.started_at = ts
                         run.agent_defs = data.get("agents", [])
                         run.metadata = data.get("metadata", {})
+                        run.run_id = data.get("run_id", "")
                         for ad in run.agent_defs:
                             agent_type_map[ad.get("name", "")] = ad.get("type", "agent")
                     wf_depth += 1
@@ -472,13 +481,13 @@ def _load_event_logs() -> list[WorkflowRun]:
             if any(_pid_matches_run(a, run) for a in active_runs):
                 run.status = "running"
 
-        # Fix #2: gate-waiting runs are legitimately idle — no events are
-        # emitted between gate_presented and gate_resolved (the human may
-        # take hours/days to respond). Keep them marked running regardless
-        # of mtime so they stay visible in the Active Runs section.
+        # Fix #2: gate-waiting runs with a live process should stay running.
+        # But don't force-override for dead processes — those go to Abandoned
+        # with the "GATE ABANDONED" badge via process_alive check.
         if (
             run.status not in ("running", "completed", "failed")
             and run.gate_waiting
+            and any(_pid_matches_run(a, run) for a in active_runs)
         ):
             run.status = "running"
 
@@ -560,27 +569,45 @@ def _get_conductor_ports() -> dict[int, int]:
 
 
 def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[str, int]:
-    """Map workflow names to their conductor dashboard ports.
+    """Map run_ids to their conductor dashboard ports.
 
-    Each conductor dashboard serves a unique run. Returns
-    {workflow_name: port} for matching against event log runs.
+    Probes /api/info first (exact run_id matching), falls back to
+    /api/state (name-based matching for old conductor versions).
 
-    Skips ports whose workflow has already reached a terminal state
-    (workflow_completed or workflow_failed at depth 0).
+    Returns {run_id_or_name: port}. Prefers run_id when available.
 
     *exclude_port* is the dashboard's own port, so it never probes itself.
     """
     import urllib.request
-    name_to_port: dict[str, int] = {}
+    result: dict[str, int] = {}
     listening = _get_listening_ports()
     candidates = [p for p in listening if p > 49000 and p != exclude_port]
     for port in candidates:
         try:
+            # Try /api/info first (new conductor with run_id support)
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/info",
+                headers={"User-Agent": "conductor-dashboard-probe"},
+            )
+            with urllib.request.urlopen(req, timeout=0.3) as resp:
+                info = json.loads(resp.read().decode("utf-8", errors="replace"))
+                if isinstance(info, dict):
+                    run_id = info.get("run_id", "")
+                    wf_name = info.get("workflow_name", "")
+                    if run_id:
+                        result[run_id] = port
+                    elif wf_name:
+                        result[wf_name] = port
+                    continue
+        except Exception:
+            pass
+        try:
+            # Fallback: /api/state (old conductor without /api/info)
             req = urllib.request.Request(
                 f"http://127.0.0.1:{port}/api/state",
                 headers={"User-Agent": "conductor-dashboard-probe"},
             )
-            with urllib.request.urlopen(req, timeout=0.2) as resp:
+            with urllib.request.urlopen(req, timeout=0.3) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
                 if isinstance(data, list):
                     wf_name = ""
@@ -597,18 +624,14 @@ def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[str, int]
                                 depth = max(0, depth - 1)
                                 if depth == 0:
                                     terminal_at_root = True
-                            if etype:
-                                pass
                     if terminal_at_root:
                         continue
                     if wf_name:
-                        # Use name+port; if multiple runs share the same name,
-                        # keep the latest port (highest port = most recent).
-                        if wf_name not in name_to_port or port > name_to_port[wf_name]:
-                            name_to_port[wf_name] = port
+                        if wf_name not in result or port > result[wf_name]:
+                            result[wf_name] = port
         except Exception:
             pass
-    return name_to_port
+    return result
 
 
 def _load_active_runs() -> list[ActiveRun]:
@@ -1841,23 +1864,27 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     """Convert a WorkflowRun to a JSON-serializable dict."""
     if alive_pid_runs is None:
         alive_pid_runs = []
-    # Find matching dashboard port by workflow name
-    dashboard_port = name_to_port.get(r.name)
+    # Find matching dashboard port — prefer exact run_id match, fall back to name
+    dashboard_port = None
+    if r.run_id:
+        dashboard_port = name_to_port.get(r.run_id)
+    if not dashboard_port:
+        dashboard_port = name_to_port.get(r.name)
 
     # Determine whether the backing conductor process is actually alive.
-    # A run is "alive" if either:
-    #   (a) its per-run dashboard port is currently listening (name_to_port hit), OR
-    #   (b) a registered PID file matches (backgrounded --web-bg runs), OR
-    #   (c) the log file was recently modified — the most reliable signal for
-    #       foreground runs where there's no port or PID file.
-    process_alive = bool(dashboard_port) or any(
+    # PID match is the strongest signal. mtime is the fallback for foreground runs.
+    process_alive = any(
         _pid_matches_run(a, r) for a in alive_pid_runs
     )
-    if not process_alive and r.last_event_ts:
+    if not process_alive and r.log_file:
         try:
             mtime = Path(r.log_file).stat().st_mtime
-            if (time.time() - mtime) < 300:  # 5 min, same as parser
+            if (time.time() - mtime) < 300:  # 5 min
                 process_alive = True
+            elif dashboard_port:
+                # mtime is stale — this port likely belongs to a different run
+                # with the same workflow name. Don't link it.
+                dashboard_port = None
         except OSError:
             pass
 
