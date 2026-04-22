@@ -1238,6 +1238,11 @@ function hierarchyHtml(r) {
             html += parts.join(' ');
             html += '</span></span>';
         }
+    } else {
+        // No children — show the focus item state inline
+        var focusClass = h.focus.state === 'Done' ? 'done-ct' : (h.focus.state === 'Doing' ? 'doing-ct' : 'todo-ct');
+        html += '<span class="hierarchy-focus"><span class="'+focusClass+'">' + esc(h.focus.state) + '</span></span>';
+        html += '<span class="hierarchy-counts" style="opacity:0.6"> (no child items)</span>';
     }
     html += '</span>';
     return html;
