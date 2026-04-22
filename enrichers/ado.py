@@ -31,7 +31,16 @@ TWIG_DB_FALLBACK_PATHS: list[Path] = [
     Path.home() / ".twig" / "twig.db",
 ]
 
-_HIERARCHY_LEVELS = ["Epic", "Feature", "Issue", "Task"]
+# Ordered hierarchy levels per process template.
+# Types not in these lists are appended dynamically.
+_HIERARCHY_AGILE = ["Epic", "Feature", "Issue", "Task"]
+_HIERARCHY_CMMI = ["Epic", "Scenario", "Deliverable", "Task Group", "Task"]
+
+def _hierarchy_order(found_types: set[str]) -> list[str]:
+    """Pick the best hierarchy ordering based on which types are present."""
+    if found_types & {"Scenario", "Deliverable"}:
+        return _HIERARCHY_CMMI
+    return _HIERARCHY_AGILE
 
 # Cache: work_item_id -> (timestamp, result)
 _hierarchy_cache: dict[int, tuple[float, dict | None]] = {}
@@ -48,17 +57,43 @@ def _resolve_twig_db(cwd: Path, metadata: dict) -> Path | None:
     """Find the twig.db file for the given working directory.
 
     Strategy:
-      1. Check {cwd}/.twig/ for config and DB
-      2. If cwd is a git worktree, check the main worktree's .twig/
-      3. Fall back to hardcoded paths
+      1. If metadata declares project_url, use ~/.twig/{org}/{project}/twig.db
+      2. Check {cwd}/.twig/ for config and DB
+      3. If cwd is a git worktree, check the main worktree's .twig/
+      4. Fall back to hardcoded paths
     """
-    cache_key = str(cwd)
+    cache_key = str(cwd) + "|" + metadata.get("project_url", "")
     if cache_key in _db_path_cache:
         return _db_path_cache[cache_key]
 
-    result = _find_twig_db_in_dir(cwd)
+    result: Path | None = None
 
-    # If not found and cwd might be a git worktree, check the main tree
+    # Explicit project_url in metadata → use global twig DB for that org/project
+    if metadata.get("project_url"):
+        import re
+        m = re.search(r"dev\.azure\.com/([^/]+)/([^/]+)", metadata["project_url"])
+        if m:
+            # Check per-repo first (cwd/.twig/{org}/{project})
+            local_db = cwd / ".twig" / m.group(1) / m.group(2) / "twig.db"
+            if local_db.exists():
+                result = local_db
+            else:
+                # Check main worktree
+                main_tree = _find_main_worktree(cwd)
+                if main_tree and main_tree != cwd:
+                    wt_db = main_tree / ".twig" / m.group(1) / m.group(2) / "twig.db"
+                    if wt_db.exists():
+                        result = wt_db
+                # Fall back to global ~/.twig/{org}/{project}
+                if result is None:
+                    global_db = Path.home() / ".twig" / m.group(1) / m.group(2) / "twig.db"
+                    if global_db.exists():
+                        result = global_db
+
+    # No metadata or project_url didn't resolve → try CWD-based discovery
+    if result is None:
+        result = _find_twig_db_in_dir(cwd)
+
     if result is None:
         main_tree = _find_main_worktree(cwd)
         if main_tree and main_tree != cwd:
@@ -200,26 +235,30 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
         for typ, state, cnt in rows:
             level_map.setdefault(typ, {})[state] = cnt
 
+        # Pick the right hierarchy ordering based on observed types
+        ordered = _hierarchy_order(set(level_map.keys()))
         levels = []
-        for lvl in _HIERARCHY_LEVELS:
+        seen: set[str] = set()
+        for lvl in ordered:
             if lvl in level_map:
                 counts = level_map[lvl]
                 total = sum(counts.values())
                 levels.append({
                     "type": lvl,
-                    "To Do": counts.get("To Do", 0),
-                    "Doing": counts.get("Doing", 0),
-                    "Done": counts.get("Done", 0),
+                    "To Do": counts.get("To Do", 0) + counts.get("Proposed", 0),
+                    "Doing": counts.get("Doing", 0) + counts.get("Started", 0) + counts.get("Active", 0),
+                    "Done": counts.get("Done", 0) + counts.get("Completed", 0) + counts.get("Closed", 0) + counts.get("Resolved", 0),
                     "total": total,
                 })
+                seen.add(lvl)
         for lvl, counts in level_map.items():
-            if lvl not in _HIERARCHY_LEVELS:
+            if lvl not in seen:
                 total = sum(counts.values())
                 levels.append({
                     "type": lvl,
-                    "To Do": counts.get("To Do", 0),
-                    "Doing": counts.get("Doing", 0),
-                    "Done": counts.get("Done", 0),
+                    "To Do": counts.get("To Do", 0) + counts.get("Proposed", 0),
+                    "Doing": counts.get("Doing", 0) + counts.get("Started", 0) + counts.get("Active", 0),
+                    "Done": counts.get("Done", 0) + counts.get("Completed", 0) + counts.get("Closed", 0) + counts.get("Resolved", 0),
                     "total": total,
                 })
 
