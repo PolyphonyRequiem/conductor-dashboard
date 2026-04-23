@@ -69,38 +69,35 @@ export function RunDetailPanel({ run }: Props) {
       )}
 
       {/* Work item hierarchy details */}
-      {hierarchy && hierarchy.levels && hierarchy.levels.length > 0 && (
+      {hierarchy && hierarchy.focus && (
         <div>
           <div className="text-xs uppercase tracking-wide text-[--color-text2] mb-1.5">Work Item Hierarchy</div>
-          <div className="space-y-1">
-            {hierarchy.levels.map((level, i) => {
-              const stateColor =
-                level.state === 'Done' ? 'text-[--color-green]' :
-                level.state === 'Doing' ? 'text-[--color-yellow]' :
-                'text-[--color-text2]';
-              return (
-                <div key={i} className="flex items-center gap-2 text-xs">
-                  <span className="text-[--color-text2] min-w-[60px]">{level.type}</span>
-                  <span className="font-medium">#{level.id}</span>
-                  <span className="truncate text-[--color-text2]">{level.title}</span>
-                  <span className={`shrink-0 ${stateColor}`}>{level.state}</span>
-                </div>
-              );
-            })}
+          {/* Focus item */}
+          <div className="flex items-center gap-2 text-xs mb-2">
+            <span className="font-medium text-[--color-text]">{hierarchy.focus.type} #{hierarchy.focus.id}</span>
+            <span className="truncate">{hierarchy.focus.title}</span>
+            <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+              hierarchy.focus.state === 'Done' ? 'bg-green-900/40 text-green-300' :
+              hierarchy.focus.state === 'Doing' ? 'bg-yellow-900/40 text-yellow-300' :
+              'bg-[--color-surface] text-[--color-text2]'
+            }`}>{hierarchy.focus.state}</span>
           </div>
-          {/* Progress bar (detailed) */}
-          {hierarchy.progress && (
-            <div className="mt-2">
-              <div className="flex gap-0.5 h-2 rounded overflow-hidden mb-1">
-                {hierarchy.progress.done > 0 && <div className="bg-[--color-green]" style={{ flex: hierarchy.progress.done }} />}
-                {hierarchy.progress.doing > 0 && <div className="bg-[--color-yellow]" style={{ flex: hierarchy.progress.doing }} />}
-                {hierarchy.progress.todo > 0 && <div className="bg-[--color-border]" style={{ flex: hierarchy.progress.todo }} />}
+          {/* Level breakdowns with progress bars */}
+          {hierarchy.levels.map((level, i) => {
+            const total = level.total || 1;
+            const donePct = Math.round((level.Done / total) * 100);
+            const doingPct = Math.round((level.Doing / total) * 100);
+            return (
+              <div key={i} className="flex items-center gap-2 text-xs mb-1">
+                <span className="text-[--color-text2] min-w-[45px]">{level.type}</span>
+                <div className="flex h-1.5 flex-1 max-w-[200px] rounded overflow-hidden bg-[--color-border]">
+                  {level.Done > 0 && <div className="bg-[--color-green]" style={{ width: `${donePct}%` }} />}
+                  {level.Doing > 0 && <div className="bg-[--color-yellow]" style={{ width: `${doingPct}%` }} />}
+                </div>
+                <span className="text-[--color-text2] tabular-nums">{level.Done}/{total} done</span>
               </div>
-              <div className="text-xs text-[--color-text2]">
-                ✅ {hierarchy.progress.done} done · 🔧 {hierarchy.progress.doing} in progress · ○ {hierarchy.progress.todo} to do
-              </div>
-            </div>
-          )}
+            );
+          })}
         </div>
       )}
 

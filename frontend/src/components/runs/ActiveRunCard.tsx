@@ -110,18 +110,17 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     );
   }
 
-  if (run.hierarchy?.progress) {
-    const p = run.hierarchy.progress;
-    const total = p.done + p.doing + p.todo;
-    if (total > 0) {
+  if (run.hierarchy?.levels && run.hierarchy.levels.length > 0) {
+    const lv = run.hierarchy.levels[run.hierarchy.levels.length - 1]!;
+    const total = lv.total || 1;
+    if (total > 1) {
       badges.push(
         <span key="prog" className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-[--color-surface] border border-[--color-border] text-[--color-text2]">
-          <span className="flex gap-px h-1.5 w-12 rounded overflow-hidden">
-            {p.done > 0 && <span className="bg-[--color-green]" style={{ flex: p.done }} />}
-            {p.doing > 0 && <span className="bg-[--color-yellow]" style={{ flex: p.doing }} />}
-            {p.todo > 0 && <span className="bg-[--color-border]" style={{ flex: p.todo }} />}
+          <span className="flex gap-px h-1.5 w-12 rounded overflow-hidden bg-[--color-border]">
+            {lv.Done > 0 && <span className="bg-[--color-green]" style={{ width: `${Math.round((lv.Done / total) * 100)}%` }} />}
+            {lv.Doing > 0 && <span className="bg-[--color-yellow]" style={{ width: `${Math.round((lv.Doing / total) * 100)}%` }} />}
           </span>
-          {p.done}/{total}
+          {lv.Done}/{total}
         </span>,
       );
     }

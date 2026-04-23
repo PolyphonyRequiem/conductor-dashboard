@@ -96,13 +96,30 @@ export interface WorktreeInfo {
 }
 
 export interface HierarchyData {
+  focus: HierarchyFocus;
   levels: HierarchyLevel[];
-  progress: { done: number; doing: number; todo: number };
+  ancestors: HierarchyAncestor[];
+  progress?: { done: number; doing: number; todo: number };
+}
+
+export interface HierarchyFocus {
+  id: number;
+  type: string;
+  title: string;
+  state: string;
 }
 
 export interface HierarchyLevel {
   type: string;
+  'To Do': number;
+  Doing: number;
+  Done: number;
+  total: number;
+}
+
+export interface HierarchyAncestor {
   id: number;
+  type: string;
   title: string;
   state: string;
 }
