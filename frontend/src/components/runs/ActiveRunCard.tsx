@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, GitBranch, Hash, Layers, DollarSign, Zap } from 'lucide-react';
+import { ChevronRight, ExternalLink, GitBranch, Hash, DollarSign, Zap } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
@@ -83,33 +83,6 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     );
   }
 
-  if (run.iteration > 1) {
-    badges.push(
-      <span key="it" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-900/30 border border-purple-700/40 text-purple-300">
-        <Layers size={10} />
-        Iter {run.iteration}
-      </span>,
-    );
-  }
-
-  if (run.total_cost > 0) {
-    badges.push(
-      <span key="cost" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-yellow-900/20 border border-yellow-700/30 text-yellow-300">
-        <DollarSign size={10} />
-        {fmtCost2(run.total_cost)}
-      </span>,
-    );
-  }
-
-  if (run.total_tokens > 0) {
-    badges.push(
-      <span key="tok" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-cyan-900/20 border border-cyan-700/30 text-cyan-300">
-        <Zap size={10} />
-        {fmtTokens(run.total_tokens)}
-      </span>,
-    );
-  }
-
   if (run.hierarchy?.levels && run.hierarchy.levels.length > 0) {
     const lv = run.hierarchy.levels[run.hierarchy.levels.length - 1]!;
     const total = lv.total || 1;
@@ -145,6 +118,35 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     }
   }
 
+  // Title-line inline metrics
+  const titleMetrics: React.ReactNode[] = [];
+
+  if (run.iteration > 1) {
+    titleMetrics.push(
+      <span key="it" className="text-xs text-purple-300 tabular-nums">
+        iter {run.iteration}
+      </span>,
+    );
+  }
+
+  if (run.total_cost > 0) {
+    titleMetrics.push(
+      <span key="cost" className="inline-flex items-center gap-0.5 text-xs text-yellow-300 tabular-nums">
+        <DollarSign size={10} />
+        {fmtCost2(run.total_cost)}
+      </span>,
+    );
+  }
+
+  if (run.total_tokens > 0) {
+    titleMetrics.push(
+      <span key="tok" className="inline-flex items-center gap-0.5 text-xs text-cyan-300 tabular-nums">
+        <Zap size={10} />
+        {fmtTokens(run.total_tokens)}
+      </span>,
+    );
+  }
+
   return (
     <div
       className={`bg-[--color-surface] border border-[--color-border] rounded-lg overflow-hidden border-l-3 mb-3 ${borderClass} ${isAbandoned ? 'opacity-65' : ''}`}
@@ -159,7 +161,12 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
           className={`text-[--color-text2] transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
         />
         <PowerlineBreadcrumbs run={run} />
-        <div className="flex items-center gap-3 ml-auto shrink-0">
+        <div className="flex items-center gap-2.5 ml-auto shrink-0">
+          {titleMetrics.length > 0 && (
+            <span className="flex items-center gap-2 border-r border-[--color-border] pr-2.5">
+              {titleMetrics}
+            </span>
+          )}
           {run.status === 'running' && run.started_at && (
             <DurationTicker startedAt={run.started_at} className="text-[--color-text2] text-sm tabular-nums" />
           )}

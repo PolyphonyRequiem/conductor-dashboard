@@ -1,9 +1,8 @@
-import { ExternalLink, GitBranch, Copy, Layers } from 'lucide-react';
+import { ExternalLink, GitBranch, Layers } from 'lucide-react';
 import type { RunData, TypeStateDef } from '@/types/dashboard';
-import { fmtCost, fmtTokens, fmtDuration, stateBadgeClass, categoryBarColor } from '@/lib/format';
+import { fmtDuration, stateBadgeClass, categoryBarColor } from '@/lib/format';
 import { useConductorWs } from '@/hooks/use-conductor-ws';
 import { EmbeddedWorkflowGraph } from '@/components/graph/EmbeddedWorkflowGraph';
-import { toast } from '@/components/shared/Toast';
 
 interface Props {
   run: RunData;
@@ -19,16 +18,9 @@ export function RunDetailPanel({ run }: Props) {
     enabled: isLive,
   });
 
-  const copyReplayCmd = () => {
-    if (run.replay_cmd) {
-      navigator.clipboard.writeText(run.replay_cmd);
-      toast('📋 Replay command copied', 'ok');
-    }
-  };
-
   return (
     <div className="border-t border-[--color-border] px-4 py-3 text-sm space-y-4">
-      {/* Top action bar: Conductor UI + Replay */}
+      {/* Top action bar */}
       <div className="flex items-center gap-3 flex-wrap">
         {run.dashboard_url && (
           <a
@@ -40,15 +32,6 @@ export function RunDetailPanel({ run }: Props) {
             <ExternalLink size={12} />
             Conductor UI :{run.dashboard_port}
           </a>
-        )}
-        {run.replay_cmd && (
-          <button
-            onClick={copyReplayCmd}
-            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-[--color-surface] border border-[--color-border] text-[--color-text2] hover:bg-[--color-surface-hover] transition-colors"
-          >
-            <Copy size={12} />
-            Copy Replay Cmd
-          </button>
         )}
         {run.cwd && (
           <span className="text-xs text-[--color-text2] truncate max-w-[300px]" title={run.cwd}>
@@ -177,36 +160,6 @@ export function RunDetailPanel({ run }: Props) {
         </div>
       )}
 
-      {/* Agent summary (compact, collapsible in future) */}
-      {run.agents.length > 0 && (
-        <details className="group">
-          <summary className="text-xs uppercase tracking-wide text-[--color-text2] cursor-pointer select-none hover:text-[--color-text]">
-            Agents ({run.agent_count}) · Cost: {run.cost_str} · Tokens: {run.tokens_str}
-          </summary>
-          <table className="w-full text-xs mt-1.5">
-            <thead>
-              <tr className="text-[--color-text2]">
-                <th className="text-left py-1">Name</th>
-                <th className="text-left py-1">Model</th>
-                <th className="text-right py-1">Elapsed</th>
-                <th className="text-right py-1">Tokens</th>
-                <th className="text-right py-1">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {run.agents.map((a, i) => (
-                <tr key={i} className="border-t border-[--color-border]/50">
-                  <td className="py-1">{a.name}</td>
-                  <td className="py-1 text-[--color-text2]">{a.model}</td>
-                  <td className="py-1 text-right tabular-nums">{fmtDuration(a.elapsed)}</td>
-                  <td className="py-1 text-right tabular-nums">{fmtTokens(a.tokens)}</td>
-                  <td className="py-1 text-right tabular-nums">{fmtCost(a.cost_usd)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
-      )}
     </div>
   );
 }
