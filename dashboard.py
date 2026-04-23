@@ -1157,6 +1157,10 @@ a:hover { text-decoration: underline; }
 </div>
 
 <script>
+// morphdom — DOM diffing library (2.7.4, inlined)
+(function(global,factory){typeof exports==="object"&&typeof module!=="undefined"?module.exports=factory():typeof define==="function"&&define.amd?define(factory):(global=global||self,global.morphdom=factory())})(this,function(){"use strict";var DOCUMENT_FRAGMENT_NODE=11;function morphAttrs(fromNode,toNode){var toNodeAttrs=toNode.attributes;var attr;var attrName;var attrNamespaceURI;var attrValue;var fromValue;if(toNode.nodeType===DOCUMENT_FRAGMENT_NODE||fromNode.nodeType===DOCUMENT_FRAGMENT_NODE){return}for(var i=toNodeAttrs.length-1;i>=0;i--){attr=toNodeAttrs[i];attrName=attr.name;attrNamespaceURI=attr.namespaceURI;attrValue=attr.value;if(attrNamespaceURI){attrName=attr.localName||attrName;fromValue=fromNode.getAttributeNS(attrNamespaceURI,attrName);if(fromValue!==attrValue){if(attr.prefix==="xmlns"){attrName=attr.name}fromNode.setAttributeNS(attrNamespaceURI,attrName,attrValue)}}else{fromValue=fromNode.getAttribute(attrName);if(fromValue!==attrValue){fromNode.setAttribute(attrName,attrValue)}}}var fromNodeAttrs=fromNode.attributes;for(var d=fromNodeAttrs.length-1;d>=0;d--){attr=fromNodeAttrs[d];attrName=attr.name;attrNamespaceURI=attr.namespaceURI;if(attrNamespaceURI){attrName=attr.localName||attrName;if(!toNode.hasAttributeNS(attrNamespaceURI,attrName)){fromNode.removeAttributeNS(attrNamespaceURI,attrName)}}else{if(!toNode.hasAttribute(attrName)){fromNode.removeAttribute(attrName)}}}}var range;var NS_XHTML="http://www.w3.org/1999/xhtml";var doc=typeof document==="undefined"?undefined:document;var HAS_TEMPLATE_SUPPORT=!!doc&&"content"in doc.createElement("template");var HAS_RANGE_SUPPORT=!!doc&&doc.createRange&&"createContextualFragment"in doc.createRange();function createFragmentFromTemplate(str){var template=doc.createElement("template");template.innerHTML=str;return template.content.childNodes[0]}function createFragmentFromRange(str){if(!range){range=doc.createRange();range.selectNode(doc.body)}var fragment=range.createContextualFragment(str);return fragment.childNodes[0]}function createFragmentFromWrap(str){var fragment=doc.createElement("body");fragment.innerHTML=str;return fragment.childNodes[0]}function toElement(str){str=str.trim();if(HAS_TEMPLATE_SUPPORT){return createFragmentFromTemplate(str)}else if(HAS_RANGE_SUPPORT){return createFragmentFromRange(str)}return createFragmentFromWrap(str)}function compareNodeNames(fromEl,toEl){var fromNodeName=fromEl.nodeName;var toNodeName=toEl.nodeName;var fromCodeStart,toCodeStart;if(fromNodeName===toNodeName){return true}fromCodeStart=fromNodeName.charCodeAt(0);toCodeStart=toNodeName.charCodeAt(0);if(fromCodeStart<=90&&toCodeStart>=97){return fromNodeName===toNodeName.toUpperCase()}else if(toCodeStart<=90&&fromCodeStart>=97){return toNodeName===fromNodeName.toUpperCase()}else{return false}}function createElementNS(name,namespaceURI){return!namespaceURI||namespaceURI===NS_XHTML?doc.createElement(name):doc.createElementNS(namespaceURI,name)}function moveChildren(fromEl,toEl){var curChild=fromEl.firstChild;while(curChild){var nextChild=curChild.nextSibling;toEl.appendChild(curChild);curChild=nextChild}return toEl}function syncBooleanAttrProp(fromEl,toEl,name){if(fromEl[name]!==toEl[name]){fromEl[name]=toEl[name];if(fromEl[name]){fromEl.setAttribute(name,"")}else{fromEl.removeAttribute(name)}}}var specialElHandlers={OPTION:function(fromEl,toEl){var parentNode=fromEl.parentNode;if(parentNode){var parentName=parentNode.nodeName.toUpperCase();if(parentName==="OPTGROUP"){parentNode=parentNode.parentNode;parentName=parentNode&&parentNode.nodeName.toUpperCase()}if(parentName==="SELECT"&&!parentNode.hasAttribute("multiple")){if(fromEl.hasAttribute("selected")&&!toEl.selected){fromEl.setAttribute("selected","selected");fromEl.removeAttribute("selected")}parentNode.selectedIndex=-1}}syncBooleanAttrProp(fromEl,toEl,"selected")},INPUT:function(fromEl,toEl){syncBooleanAttrProp(fromEl,toEl,"checked");syncBooleanAttrProp(fromEl,toEl,"disabled");if(fromEl.value!==toEl.value){fromEl.value=toEl.value}if(!toEl.hasAttribute("value")){fromEl.removeAttribute("value")}},TEXTAREA:function(fromEl,toEl){var newValue=toEl.value;if(fromEl.value!==newValue){fromEl.value=newValue}var firstChild=fromEl.firstChild;if(firstChild){var oldValue=firstChild.nodeValue;if(oldValue==newValue||!newValue&&oldValue==fromEl.placeholder){return}firstChild.nodeValue=newValue}},SELECT:function(fromEl,toEl){if(!toEl.hasAttribute("multiple")){var selectedIndex=-1;var i=0;var curChild=fromEl.firstChild;var optgroup;var nodeName;while(curChild){nodeName=curChild.nodeName&&curChild.nodeName.toUpperCase();if(nodeName==="OPTGROUP"){optgroup=curChild;curChild=optgroup.firstChild}else{if(nodeName==="OPTION"){if(curChild.hasAttribute("selected")){selectedIndex=i;break}i++}curChild=curChild.nextSibling;if(!curChild&&optgroup){curChild=optgroup.nextSibling;optgroup=null}}}fromEl.selectedIndex=selectedIndex}}};var ELEMENT_NODE=1;var DOCUMENT_FRAGMENT_NODE$1=11;var TEXT_NODE=3;var COMMENT_NODE=8;function noop(){}function defaultGetNodeKey(node){if(node){return node.getAttribute&&node.getAttribute("id")||node.id}}function morphdomFactory(morphAttrs){return function morphdom(fromNode,toNode,options){if(!options){options={}}if(typeof toNode==="string"){if(fromNode.nodeName==="#document"||fromNode.nodeName==="HTML"||fromNode.nodeName==="BODY"){var toNodeHtml=toNode;toNode=doc.createElement("html");toNode.innerHTML=toNodeHtml}else{toNode=toElement(toNode)}}else if(toNode.nodeType===DOCUMENT_FRAGMENT_NODE$1){toNode=toNode.firstElementChild}var getNodeKey=options.getNodeKey||defaultGetNodeKey;var onBeforeNodeAdded=options.onBeforeNodeAdded||noop;var onNodeAdded=options.onNodeAdded||noop;var onBeforeElUpdated=options.onBeforeElUpdated||noop;var onElUpdated=options.onElUpdated||noop;var onBeforeNodeDiscarded=options.onBeforeNodeDiscarded||noop;var onNodeDiscarded=options.onNodeDiscarded||noop;var onBeforeElChildrenUpdated=options.onBeforeElChildrenUpdated||noop;var skipFromChildren=options.skipFromChildren||noop;var addChild=options.addChild||function(parent,child){return parent.appendChild(child)};var childrenOnly=options.childrenOnly===true;var fromNodesLookup=Object.create(null);var keyedRemovalList=[];function addKeyedRemoval(key){keyedRemovalList.push(key)}function walkDiscardedChildNodes(node,skipKeyedNodes){if(node.nodeType===ELEMENT_NODE){var curChild=node.firstChild;while(curChild){var key=undefined;if(skipKeyedNodes&&(key=getNodeKey(curChild))){addKeyedRemoval(key)}else{onNodeDiscarded(curChild);if(curChild.firstChild){walkDiscardedChildNodes(curChild,skipKeyedNodes)}}curChild=curChild.nextSibling}}}function removeNode(node,parentNode,skipKeyedNodes){if(onBeforeNodeDiscarded(node)===false){return}if(parentNode){parentNode.removeChild(node)}onNodeDiscarded(node);walkDiscardedChildNodes(node,skipKeyedNodes)}function indexTree(node){if(node.nodeType===ELEMENT_NODE||node.nodeType===DOCUMENT_FRAGMENT_NODE$1){var curChild=node.firstChild;while(curChild){var key=getNodeKey(curChild);if(key){fromNodesLookup[key]=curChild}indexTree(curChild);curChild=curChild.nextSibling}}}indexTree(fromNode);function handleNodeAdded(el){onNodeAdded(el);var curChild=el.firstChild;while(curChild){var nextSibling=curChild.nextSibling;var key=getNodeKey(curChild);if(key){var unmatchedFromEl=fromNodesLookup[key];if(unmatchedFromEl&&compareNodeNames(curChild,unmatchedFromEl)){curChild.parentNode.replaceChild(unmatchedFromEl,curChild);morphEl(unmatchedFromEl,curChild)}else{handleNodeAdded(curChild)}}else{handleNodeAdded(curChild)}curChild=nextSibling}}function cleanupFromEl(fromEl,curFromNodeChild,curFromNodeKey){while(curFromNodeChild){var fromNextSibling=curFromNodeChild.nextSibling;if(curFromNodeKey=getNodeKey(curFromNodeChild)){addKeyedRemoval(curFromNodeKey)}else{removeNode(curFromNodeChild,fromEl,true)}curFromNodeChild=fromNextSibling}}function morphEl(fromEl,toEl,childrenOnly){var toElKey=getNodeKey(toEl);if(toElKey){delete fromNodesLookup[toElKey]}if(!childrenOnly){var beforeUpdateResult=onBeforeElUpdated(fromEl,toEl);if(beforeUpdateResult===false){return}else if(beforeUpdateResult instanceof HTMLElement){fromEl=beforeUpdateResult;indexTree(fromEl)}morphAttrs(fromEl,toEl);onElUpdated(fromEl);if(onBeforeElChildrenUpdated(fromEl,toEl)===false){return}}if(fromEl.nodeName!=="TEXTAREA"){morphChildren(fromEl,toEl)}else{specialElHandlers.TEXTAREA(fromEl,toEl)}}function morphChildren(fromEl,toEl){var skipFrom=skipFromChildren(fromEl,toEl);var curToNodeChild=toEl.firstChild;var curFromNodeChild=fromEl.firstChild;var curToNodeKey;var curFromNodeKey;var fromNextSibling;var toNextSibling;var matchingFromEl;outer:while(curToNodeChild){toNextSibling=curToNodeChild.nextSibling;curToNodeKey=getNodeKey(curToNodeChild);while(!skipFrom&&curFromNodeChild){fromNextSibling=curFromNodeChild.nextSibling;if(curToNodeChild.isSameNode&&curToNodeChild.isSameNode(curFromNodeChild)){curToNodeChild=toNextSibling;curFromNodeChild=fromNextSibling;continue outer}curFromNodeKey=getNodeKey(curFromNodeChild);var curFromNodeType=curFromNodeChild.nodeType;var isCompatible=undefined;if(curFromNodeType===curToNodeChild.nodeType){if(curFromNodeType===ELEMENT_NODE){if(curToNodeKey){if(curToNodeKey!==curFromNodeKey){if(matchingFromEl=fromNodesLookup[curToNodeKey]){if(fromNextSibling===matchingFromEl){isCompatible=false}else{fromEl.insertBefore(matchingFromEl,curFromNodeChild);if(curFromNodeKey){addKeyedRemoval(curFromNodeKey)}else{removeNode(curFromNodeChild,fromEl,true)}curFromNodeChild=matchingFromEl;curFromNodeKey=getNodeKey(curFromNodeChild)}}else{isCompatible=false}}}else if(curFromNodeKey){isCompatible=false}isCompatible=isCompatible!==false&&compareNodeNames(curFromNodeChild,curToNodeChild);if(isCompatible){morphEl(curFromNodeChild,curToNodeChild)}}else if(curFromNodeType===TEXT_NODE||curFromNodeType==COMMENT_NODE){isCompatible=true;if(curFromNodeChild.nodeValue!==curToNodeChild.nodeValue){curFromNodeChild.nodeValue=curToNodeChild.nodeValue}}}if(isCompatible){curToNodeChild=toNextSibling;curFromNodeChild=fromNextSibling;continue outer}if(curFromNodeKey){addKeyedRemoval(curFromNodeKey)}else{removeNode(curFromNodeChild,fromEl,true)}curFromNodeChild=fromNextSibling}if(curToNodeKey&&(matchingFromEl=fromNodesLookup[curToNodeKey])&&compareNodeNames(matchingFromEl,curToNodeChild)){if(!skipFrom){addChild(fromEl,matchingFromEl)}morphEl(matchingFromEl,curToNodeChild)}else{var onBeforeNodeAddedResult=onBeforeNodeAdded(curToNodeChild);if(onBeforeNodeAddedResult!==false){if(onBeforeNodeAddedResult){curToNodeChild=onBeforeNodeAddedResult}if(curToNodeChild.actualize){curToNodeChild=curToNodeChild.actualize(fromEl.ownerDocument||doc)}addChild(fromEl,curToNodeChild);handleNodeAdded(curToNodeChild)}}curToNodeChild=toNextSibling;curFromNodeChild=fromNextSibling}cleanupFromEl(fromEl,curFromNodeChild,curFromNodeKey);var specialElHandler=specialElHandlers[fromEl.nodeName];if(specialElHandler){specialElHandler(fromEl,toEl)}}var morphedNode=fromNode;var morphedNodeType=morphedNode.nodeType;var toNodeType=toNode.nodeType;if(!childrenOnly){if(morphedNodeType===ELEMENT_NODE){if(toNodeType===ELEMENT_NODE){if(!compareNodeNames(fromNode,toNode)){onNodeDiscarded(fromNode);morphedNode=moveChildren(fromNode,createElementNS(toNode.nodeName,toNode.namespaceURI))}}else{morphedNode=toNode}}else if(morphedNodeType===TEXT_NODE||morphedNodeType===COMMENT_NODE){if(toNodeType===morphedNodeType){if(morphedNode.nodeValue!==toNode.nodeValue){morphedNode.nodeValue=toNode.nodeValue}return morphedNode}else{morphedNode=toNode}}}if(morphedNode===toNode){onNodeDiscarded(fromNode)}else{if(toNode.isSameNode&&toNode.isSameNode(morphedNode)){return}morphEl(morphedNode,toNode,childrenOnly);if(keyedRemovalList){for(var i=0,len=keyedRemovalList.length;i<len;i++){var elToRemove=fromNodesLookup[keyedRemovalList[i]];if(elToRemove){removeNode(elToRemove,elToRemove.parentNode,false)}}}}if(!childrenOnly&&morphedNode!==fromNode&&fromNode.parentNode){if(morphedNode.actualize){morphedNode=morphedNode.actualize(fromNode.ownerDocument||doc)}fromNode.parentNode.replaceChild(morphedNode,fromNode)}return morphedNode}}var morphdom=morphdomFactory(morphAttrs);return morphdom});
+</script>
+<script>
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -1329,7 +1333,7 @@ function renderStats(stats) {
         '<div class="stat"><div class="label">Active Now</div><div class="value yellow">'+stats.active+'</div></div>' +
         '<div class="stat"><div class="label">Gates Waiting</div><div class="value yellow">'+stats.gates_waiting+'</div></div>' +
         '<div class="stat"><div class="label">Abandoned</div><div class="value red">'+(stats.abandoned||0)+'</div></div>';
-    setHtmlIfChanged('stats', html);
+    patchEl('stats', html);
 }
 
 // ---------------------------------------------------------------------------
@@ -1337,14 +1341,14 @@ function renderStats(stats) {
 // ---------------------------------------------------------------------------
 function renderActiveRuns(runs) {
     if (!runs || runs.length === 0) {
-        setHtmlIfChanged('active-runs', '<div class="empty" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px;">No active workflows</div>');
+        patchEl('active-runs', '<div class="empty" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px;">No active workflows</div>');
         return;
     }
     var html = '';
     for (var i = 0; i < runs.length; i++) {
         html += renderRunCard(runs[i], i, 'active');
     }
-    setHtmlIfChanged('active-runs', html);
+    patchEl('active-runs', html);
 }
 
 function renderRunCard(r, i, keyPrefix) {
@@ -1392,7 +1396,12 @@ function renderRunCard(r, i, keyPrefix) {
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
         html += '<span class="wf-name">'+esc(r.name)+'</span>' + subBreadcrumb;
         html += wtHtml;
-        html += '<span style="color:var(--text2);margin-left:auto">'+esc(r.elapsed)+'</span>';
+        // Elapsed: client-side ticking for running, static for terminal
+        if (r.status === 'running' && r.started_at) {
+            html += '<span class="live-elapsed" data-started="'+r.started_at+'" style="color:var(--text2);margin-left:auto"></span>';
+        } else {
+            html += '<span style="color:var(--text2);margin-left:auto">'+esc(r.elapsed)+'</span>';
+        }
         html += '<span>'+agentStatus+'</span>';
         html += '<span>'+fmtCost(r.total_cost)+'</span>';
         if (r.dashboard_url) {
@@ -1468,7 +1477,7 @@ function renderRunCard(r, i, keyPrefix) {
 function renderCompletedRuns(runs) {
     var el = document.getElementById('completed-runs');
     if (!runs || runs.length === 0) {
-        setHtmlIfChanged('completed-runs', '<table><tbody><tr><td class="empty" colspan="7">No completed runs</td></tr></tbody></table>');
+        patchEl('completed-runs', '<table><tbody><tr><td class="empty" colspan="7">No completed runs</td></tr></tbody></table>');
         return;
     }
     var reviewedCount = 0;
@@ -1525,7 +1534,7 @@ function renderCompletedRuns(runs) {
         html += '</td></tr>';
     }
     html += '</tbody></table>';
-    setHtmlIfChanged('completed-runs', html);
+    patchEl('completed-runs', html);
 }
 
 // ---------------------------------------------------------------------------
@@ -1534,7 +1543,7 @@ function renderCompletedRuns(runs) {
 function renderFailedRuns(runs) {
     var el = document.getElementById('failed-runs');
     if (!runs || runs.length === 0) {
-        setHtmlIfChanged('failed-runs', '<table><tbody><tr><td class="empty" colspan="8">No failed runs</td></tr></tbody></table>');
+        patchEl('failed-runs', '<table><tbody><tr><td class="empty" colspan="8">No failed runs</td></tr></tbody></table>');
         return;
     }
     var reviewedCount = 0;
@@ -1584,7 +1593,7 @@ function renderFailedRuns(runs) {
         html += '</td></tr>';
     }
     html += '</tbody></table>';
-    setHtmlIfChanged('failed-runs', html);
+    patchEl('failed-runs', html);
 }
 
 // ---------------------------------------------------------------------------
@@ -1785,14 +1794,26 @@ function renderMetrics() {
 }
 
 // ---------------------------------------------------------------------------
-// Render All — diff-based to avoid flicker
+// Render All — morphdom-based patching (no flicker)
 // ---------------------------------------------------------------------------
-var _renderCache = {};
-function setHtmlIfChanged(id, html) {
-    if (_renderCache[id] === html) return;
-    _renderCache[id] = html;
+function patchEl(id, html) {
     var el = document.getElementById(id);
-    if (el) el.innerHTML = html;
+    if (!el) return;
+    // Wrap in a temporary container so morphdom can diff children
+    var tmp = document.createElement(el.tagName);
+    tmp.id = id;
+    // Copy className to preserve styling
+    tmp.className = el.className;
+    tmp.innerHTML = html;
+    morphdom(el, tmp, {
+        onBeforeElUpdated: function(fromEl, toEl) {
+            // Preserve expanded/collapsed state
+            if (fromEl.classList && fromEl.classList.contains('open') && !toEl.classList.contains('open')) {
+                toEl.classList.add('open');
+            }
+            return true;
+        }
+    });
 }
 
 function renderAll() {
@@ -1827,7 +1848,7 @@ function renderAbandonedRuns(runs) {
     for (var i = 0; i < runs.length; i++) {
         html += renderRunCard(runs[i], i, 'abandoned');
     }
-    setHtmlIfChanged('abandoned-runs', html);
+    patchEl('abandoned-runs', html);
 }
 
 function toggleShowAbandoned() {
@@ -1931,6 +1952,24 @@ function toggleExpand(key) {
 // ---------------------------------------------------------------------------
 fetchDashboard();
 setInterval(fetchDashboard, 5000);
+
+// Client-side elapsed timer — ticks every second, updates .live-elapsed spans
+function fmtElapsed(sec) {
+    if (sec < 0) return '0s';
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    var s = Math.floor(sec % 60);
+    if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+    if (m > 0) return m + 'm ' + s + 's';
+    return s + 's';
+}
+setInterval(function() {
+    var now = Date.now() / 1000;
+    document.querySelectorAll('.live-elapsed').forEach(function(el) {
+        var started = parseFloat(el.getAttribute('data-started'));
+        if (started) el.textContent = fmtElapsed(now - started);
+    });
+}, 1000);
 </script>
 </body>
 </html>"""
@@ -2034,7 +2073,7 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
             "started_at_str": _ts_to_str(r.started_at),
             "ended_at": r.ended_at,
             "ended_at_str": _ts_to_str(r.ended_at),
-            "elapsed": _duration_str(r.started_at, r.ended_at if r.status != "running" else time.time()),
+        "elapsed": _duration_str(r.started_at, r.ended_at) if r.status != "running" else "",
             "status": r.status,
             "status_icon": STATUS_ICONS.get(r.status, "❓"),
             "error_type": r.error_type,
@@ -2131,7 +2170,7 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
         "started_at_str": _ts_to_str(r.started_at),
         "ended_at": r.ended_at,
         "ended_at_str": _ts_to_str(r.ended_at),
-        "elapsed": _duration_str(r.started_at, r.ended_at if r.status != "running" else time.time()),
+        "elapsed": _duration_str(r.started_at, r.ended_at) if r.status != "running" else "",
         "status": r.status,
         "status_icon": STATUS_ICONS.get(r.status, "❓"),
         "error_type": r.error_type,
