@@ -1077,6 +1077,7 @@ a:hover { text-decoration: underline; }
 }
 .chevron { color: var(--text2); font-size: 0.75rem; transition: transform 0.2s; display: inline-block; }
 .chevron.open { transform: rotate(90deg); }
+.run-purpose { color: var(--text2); font-size: 0.75rem; font-weight: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 500px; display: inline-block; vertical-align: bottom; }
 
 /* Work item badge */
 .work-item { font-size: 0.82rem; }
@@ -1396,7 +1397,9 @@ function renderRunCard(r, i, keyPrefix) {
         // --- Row 1: Workflow identity + runtime info ---
         html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+jsEsc(key)+'\\') ">';
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
-        html += '<span class="wf-name">'+esc(r.name)+'</span>' + subBreadcrumb;
+        html += '<span class="wf-name">'+esc(r.name);
+        if (r.purpose) html += '<br><span class="run-purpose">'+esc(r.purpose)+'</span>';
+        html += '</span>' + subBreadcrumb;
         html += wtHtml;
         // Elapsed: client-side ticking for running, static for terminal
         if (r.status === 'running' && r.started_at) {
