@@ -800,10 +800,12 @@ def _aggregate_metrics(runs: list[WorkflowRun]) -> dict[str, Any]:
                 ag["_elapsed_sum"] += a_elapsed
     for w in by_workflow.values():
         durs = w.pop("_durations")
-        w["avg_duration_sec"] = (sum(durs) / len(durs)) if durs else 0.0
+        w["total_runtime_sec"] = sum(durs) if durs else 0.0
+        w["avg_duration_sec"] = (w["total_runtime_sec"] / len(durs)) if durs else 0.0
         w["success_rate"] = (w["completed"] / w["runs"]) if w["runs"] else 0.0
     for ag in by_agent.values():
         es = ag.pop("_elapsed_sum")
+        ag["total_elapsed"] = es
         ag["avg_elapsed"] = (es / ag["invocations"]) if ag["invocations"] else 0.0
     top_agents_by_cost = sorted(
         [{"name": n, **v} for n, v in by_agent.items()],
@@ -1668,12 +1670,14 @@ function computeMetricsFromRuns(runs) {
     }
     Object.keys(byWorkflow).forEach(function(k){
         var w = byWorkflow[k];
-        w.avg_duration_sec = w._durs.length ? (w._durs.reduce(function(a,b){return a+b;},0)/w._durs.length) : 0;
+        w.total_runtime_sec = w._durs.length ? w._durs.reduce(function(a,b){return a+b;},0) : 0;
+        w.avg_duration_sec = w._durs.length ? (w.total_runtime_sec/w._durs.length) : 0;
         w.success_rate = w.runs ? (w.completed / w.runs) : 0;
         delete w._durs;
     });
     Object.keys(byAgent).forEach(function(k){
         var ag = byAgent[k];
+        ag.total_elapsed = ag._elapsed;
         ag.avg_elapsed = ag.invocations ? (ag._elapsed / ag.invocations) : 0;
         delete ag._elapsed;
     });
@@ -1746,13 +1750,14 @@ function renderMetrics() {
         return [
             esc(name), w.runs, w.completed, w.failed,
             (w.success_rate*100).toFixed(0)+'%',
+            fmtDuration(w.total_runtime_sec),
             fmtDuration(w.avg_duration_sec),
             '$'+Number(w.total_cost).toFixed(4),
             fmtTokens(w.total_tokens),
         ];
     });
     document.getElementById('metrics-by-workflow').innerHTML = tableFromRows(
-        ['Workflow','Runs','OK','Fail','Success','Avg Dur','Cost','Tokens'], wfRows, 'No runs in range');
+        ['Workflow','Runs','OK','Fail','Success','Total Runtime','Avg Dur','Cost','Tokens'], wfRows, 'No runs in range');
 
     // By Model
     var mdRows = Object.keys(m.by_model).map(function(name){
@@ -1766,10 +1771,10 @@ function renderMetrics() {
     var agRows = Object.keys(m.by_agent).map(function(name){
         var x = m.by_agent[name];
         return [esc(name), x.invocations, '$'+Number(x.total_cost).toFixed(4),
-                fmtTokens(x.total_tokens), fmtDuration(x.avg_elapsed)];
+                fmtTokens(x.total_tokens), fmtDuration(x.total_elapsed), fmtDuration(x.avg_elapsed)];
     });
     document.getElementById('metrics-by-agent').innerHTML = tableFromRows(
-        ['Agent','Invocations','Cost','Tokens','Avg Elapsed'], agRows, 'No agent data');
+        ['Agent','Invocations','Cost','Tokens','Total Elapsed','Avg Elapsed'], agRows, 'No agent data');
 
     // Top agents by cost
     var topRows = m.top_agents_by_cost.map(function(x){
