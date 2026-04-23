@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, GitBranch, Hash, DollarSign, Zap } from 'lucide-react';
+import { ChevronRight, ExternalLink, GitBranch, Hash, DollarSign, Zap, LayoutDashboard } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
@@ -171,6 +171,18 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
             <DurationTicker startedAt={run.started_at} className="text-[--color-text2] text-sm tabular-nums" />
           )}
           {statusLabel}
+          {run.dashboard_url && (
+            <a
+              href={run.dashboard_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1 rounded hover:bg-[--color-accent]/20 text-[--color-accent] transition-colors"
+              title={`Conductor UI :${run.dashboard_port}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <LayoutDashboard size={14} />
+            </a>
+          )}
         </div>
       </div>
 
