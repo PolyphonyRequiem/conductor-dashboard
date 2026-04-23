@@ -176,7 +176,7 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
               href={run.dashboard_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-[--color-accent]/15 border border-[--color-accent]/30 text-[--color-accent] hover:bg-[--color-accent]/25 transition-colors"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-[--color-accent] text-white hover:brightness-110 transition-all"
               title={`Open Conductor UI :${run.dashboard_port}`}
               onClick={(e) => e.stopPropagation()}
             >
