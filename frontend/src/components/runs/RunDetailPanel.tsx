@@ -12,7 +12,7 @@ export function RunDetailPanel({ run }: Props) {
   return (
     <div className="border-t border-[--color-border] px-4 py-3 text-sm space-y-3">
       {/* Work Item */}
-      {run.work_item_title && (
+      {run.work_item_id && (
         <div className="flex items-center gap-2">
           <span className="text-[--color-text2] text-xs uppercase tracking-wide">Work Item</span>
           {run.work_item_url ? (
@@ -22,10 +22,10 @@ export function RunDetailPanel({ run }: Props) {
               rel="noopener noreferrer"
               className="text-[--color-accent] hover:underline"
             >
-              {run.work_item_type ? `[${run.work_item_type}] ` : ''}{run.work_item_title}
+              {run.work_item_type ? `[${run.work_item_type}] ` : ''}#{run.work_item_id}{run.work_item_title ? ` ${run.work_item_title}` : ''}
             </a>
           ) : (
-            <span>{run.work_item_type ? `[${run.work_item_type}] ` : ''}{run.work_item_title}</span>
+            <span>{run.work_item_type ? `[${run.work_item_type}] ` : ''}#{run.work_item_id}{run.work_item_title ? ` ${run.work_item_title}` : ''}</span>
           )}
         </div>
       )}

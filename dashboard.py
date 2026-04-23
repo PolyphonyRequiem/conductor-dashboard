@@ -1288,9 +1288,9 @@ function workItemHtml(r) {
     var typeColor = r.work_item_type === 'Epic' ? 'var(--green)' : 'var(--blue)';
     var typeSpan = r.work_item_type ? '<span style="color:'+typeColor+';font-weight:500">'+esc(r.work_item_type)+'</span> ' : '';
     var idHtml = r.work_item_url
-        ? '<a href="'+esc(r.work_item_url)+'" target="_blank">#'+esc(r.work_item_id)+'</a>'
+        ? '<a href="'+esc(r.work_item_url)+'" target="_blank">#'+esc(r.work_item_id)+(r.work_item_title ? ' '+esc(r.work_item_title) : '')+'</a>'
         : '#'+esc(r.work_item_id);
-    var titleHtml = r.work_item_title ? ' '+esc(r.work_item_title) : '';
+    var titleHtml = (r.work_item_title && !r.work_item_url) ? ' '+esc(r.work_item_title) : '';
     return '<span class="work-item">&#128203; '+typeSpan+idHtml+titleHtml+'</span>';
 }
 
