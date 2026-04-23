@@ -1805,15 +1805,7 @@ function patchEl(id, html) {
     // Copy className to preserve styling
     tmp.className = el.className;
     tmp.innerHTML = html;
-    morphdom(el, tmp, {
-        onBeforeElUpdated: function(fromEl, toEl) {
-            // Preserve expanded/collapsed state
-            if (fromEl.classList && fromEl.classList.contains('open') && !toEl.classList.contains('open')) {
-                toEl.classList.add('open');
-            }
-            return true;
-        }
-    });
+    morphdom(el, tmp);
 }
 
 function renderAll() {
@@ -2032,10 +2024,13 @@ async def api_dashboard(reviewed: str = ""):
 
 def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
                    alive_pid_runs: list["ActiveRun"] | None = None,
-                   skip_enrichment: bool = False) -> dict:
+                   skip_enrichment: bool = False,
+                   all_pid_runs: list["ActiveRun"] | None = None) -> dict:
     """Convert a WorkflowRun to a JSON-serializable dict."""
     if alive_pid_runs is None:
         alive_pid_runs = []
+    if all_pid_runs is None:
+        all_pid_runs = []
     # Find matching dashboard port — prefer exact run_id match, fall back to name
     dashboard_port = None
     if r.run_id:
@@ -2044,21 +2039,29 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
         dashboard_port = name_to_port.get(r.name)
 
     # Determine whether the backing conductor process is actually alive.
-    # PID match is the strongest signal. mtime is the fallback for foreground runs.
+    # PID match is the strongest signal. mtime is the fallback ONLY for
+    # foreground runs that never registered a PID file.
     process_alive = any(
         _pid_matches_run(a, r) for a in alive_pid_runs
     )
     if not process_alive and r.log_file:
-        try:
-            mtime = Path(r.log_file).stat().st_mtime
-            if (time.time() - mtime) < 300:  # 5 min
-                process_alive = True
-            elif dashboard_port:
-                # mtime is stale — this port likely belongs to a different run
-                # with the same workflow name. Don't link it.
-                dashboard_port = None
-        except OSError:
-            pass
+        # If a dead PID file matches this run, the process genuinely
+        # terminated — don't let the mtime fallback resurrect it.
+        has_dead_pid = any(
+            _pid_matches_run(a, r)
+            for a in all_pid_runs if not a.alive
+        )
+        if not has_dead_pid:
+            try:
+                mtime = Path(r.log_file).stat().st_mtime
+                if (time.time() - mtime) < 300:  # 5 min
+                    process_alive = True
+                elif dashboard_port:
+                    # mtime is stale — this port likely belongs to a different run
+                    # with the same workflow name. Don't link it.
+                    dashboard_port = None
+            except OSError:
+                pass
 
     # Check if closeout-filing skill is available for review
     wf_name = r.name or ""
@@ -2228,7 +2231,8 @@ def _compute_dashboard(reviewed_set: set[str] | None = None) -> dict:
     errors = _aggregate_errors(runs)
     metrics = _aggregate_metrics(runs)
     name_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
-    alive_pid_runs = [a for a in _load_active_runs() if a.alive]
+    all_pid_runs = _load_active_runs()
+    alive_pid_runs = [a for a in all_pid_runs if a.alive]
 
     # Enricher caches use TTLs — no need to clear between refreshes.
     # Git worktree cache: 60s TTL. ADO DB path cache: persistent (path→DB is stable).
@@ -2248,7 +2252,7 @@ def _compute_dashboard(reviewed_set: set[str] | None = None) -> dict:
         elif r.status not in ("running", "completed", "failed"):
             # interrupted/invalid — skip enrichment
             skip = True
-        all_serialized.append(_serialize_run(r, name_to_port, alive_pid_runs, skip_enrichment=skip))
+        all_serialized.append(_serialize_run(r, name_to_port, alive_pid_runs, skip_enrichment=skip, all_pid_runs=all_pid_runs))
 
     all_running = [sr for sr in all_serialized if sr["status"] == "running"]
     active_runs = [sr for sr in all_running if sr["process_alive"]]
