@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0d1117;
+  --color-surface: #161b22;
+  --color-surface-hover: #1c2128;
+  --color-border: #30363d;
+  --color-text: #e6edf3;
+  --color-text2: #8b949e;
+  --color-accent: #58a6ff;
+  --color-green: #3fb950;
+  --color-red: #f85149;
+  --color-yellow: #d29922;
+  --color-blue: #58a6ff;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+/* Powerline clip-path chevrons */
+@keyframes pl-active-pulse {
+  0%, 100% { background-color: #1a3a5c; color: #7ab8e8; }
+  50% { background-color: #1e4470; color: #58a6ff; }
+}
+
+@keyframes pl-agent-pulse {
+  0%, 100% { background-color: #1a2e1a; color: #4eda8a; }
+  50% { background-color: #1e3a20; color: #3fb950; }
+}

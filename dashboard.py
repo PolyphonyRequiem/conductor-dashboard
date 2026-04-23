@@ -24,9 +24,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import asyncio
+import hashlib
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import StreamingResponse
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -2092,9 +2097,26 @@ app.add_middleware(
 # The dashboard's own port — set at startup so discovery can exclude it.
 _dashboard_port: int = 0
 
+# Path to the React frontend build output
+_FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
+
+
+def _dashboard_hash(data: dict) -> str:
+    """Compute a fast hash of the dashboard JSON for change detection."""
+    raw = json.dumps(data, sort_keys=True, default=str)
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+# Track last known hash for SSE diffing
+_last_sse_hash: str = ""
+
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
+    # Serve React frontend if built, otherwise fall back to legacy inline HTML
+    index_html = _FRONTEND_DIST / "index.html"
+    if index_html.exists():
+        return HTMLResponse(index_html.read_text(encoding="utf-8"))
     return _build_html()
 
 
@@ -2127,10 +2149,61 @@ def _compute_status():
 @app.get("/api/dashboard")
 async def api_dashboard(reviewed: str = ""):
     """Full dashboard data for AJAX frontend."""
-    import asyncio
     reviewed_set = set(reviewed.split(",")) if reviewed else set()
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: _compute_dashboard(reviewed_set))
+
+
+@app.get("/api/events")
+async def api_events(request: Request, reviewed: str = ""):
+    """Server-Sent Events endpoint for real-time dashboard updates.
+
+    On connect: sends a full snapshot. Then polls every 2s and sends updates
+    when the dashboard state changes. Sends heartbeat pings every 15s.
+    """
+    reviewed_set = set(reviewed.split(",")) if reviewed else set()
+
+    async def event_stream():
+        last_hash = ""
+        heartbeat_counter = 0
+        try:
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+
+                loop = asyncio.get_event_loop()
+                data = await loop.run_in_executor(
+                    None, lambda: _compute_dashboard(reviewed_set)
+                )
+                current_hash = _dashboard_hash(data)
+
+                if current_hash != last_hash:
+                    event_type = "snapshot" if not last_hash else "update"
+                    payload = json.dumps(data, default=str)
+                    yield f"event: {event_type}\ndata: {payload}\n\n"
+                    last_hash = current_hash
+                    heartbeat_counter = 0
+
+                heartbeat_counter += 1
+                # Heartbeat every ~15s (15 / 2s poll interval)
+                if heartbeat_counter >= 8:
+                    yield f"event: ping\ndata: {{}}\n\n"
+                    heartbeat_counter = 0
+
+                await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
@@ -2744,6 +2817,16 @@ def main():
     parser.add_argument("--port", type=int, default=8777, help="Port to serve on (default: 8777)")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     args = parser.parse_args()
+
+    # Mount React frontend static assets if the build exists
+    if _FRONTEND_DIST.exists() and (_FRONTEND_DIST / "index.html").exists():
+        # Mount assets directory for JS/CSS bundles
+        assets_dir = _FRONTEND_DIST / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+        print(f"   Frontend:     {_FRONTEND_DIST} (React)")
+    else:
+        print(f"   Frontend:     inline (legacy)")
 
     _dashboard_port = args.port
 
