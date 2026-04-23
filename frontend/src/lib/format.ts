@@ -37,3 +37,40 @@ export function fmtElapsed(startedAt: number): string {
 export function fmtPercent(rate: number): string {
   return `${(rate * 100).toFixed(0)}%`;
 }
+
+/** ADO state category → Tailwind badge classes (fallback when no twig color available) */
+const CATEGORY_BADGE: Record<string, string> = {
+  proposed: 'bg-gray-700/40 text-gray-300',
+  inprogress: 'bg-blue-900/40 text-blue-300',
+  completed: 'bg-green-900/40 text-green-300',
+  removed: 'bg-red-900/40 text-red-300',
+};
+
+export function stateBadgeClass(state: string, category?: string): string {
+  if (category) {
+    return CATEGORY_BADGE[category.toLowerCase()] ?? CATEGORY_BADGE.proposed!;
+  }
+  const s = state.toLowerCase();
+  if (['done', 'closed', 'completed', 'resolved'].includes(s)) return CATEGORY_BADGE.completed!;
+  if (['doing', 'active', 'started', 'in progress', 'committed'].includes(s)) return CATEGORY_BADGE.inprogress!;
+  if (['removed', 'cut'].includes(s)) return CATEGORY_BADGE.removed!;
+  if (['to do', 'proposed', 'new', 'design', 'requested'].includes(s)) return CATEGORY_BADGE.proposed!;
+  return 'bg-[--color-surface] text-[--color-text2]';
+}
+
+/** Get inline style for a state based on its hex color from twig DB */
+export function stateColorStyle(hexColor?: string): React.CSSProperties | undefined {
+  if (!hexColor || hexColor === 'b2b2b2' || hexColor === 'ffffff') return undefined;
+  return { color: `#${hexColor}` };
+}
+
+/** Category → progress bar color */
+export function categoryBarColor(category: string): string {
+  switch (category.toLowerCase()) {
+    case 'completed': return '#3fb950';
+    case 'inprogress': return '#58a6ff';
+    case 'proposed': return '#8b949e';
+    case 'removed': return '#f85149';
+    default: return '#30363d';
+  }
+}

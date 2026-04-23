@@ -114,13 +114,32 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     const lv = run.hierarchy.levels[run.hierarchy.levels.length - 1]!;
     const total = lv.total || 1;
     if (total > 1) {
+      // Use type_defs to determine completed count and bar colors
+      const typeDefs = run.hierarchy.type_defs?.[lv.type] ?? [];
+      const completedStates = typeDefs
+        .filter((d) => d.category === 'Completed')
+        .map((d) => d.name);
+      const completedCount = completedStates.length > 0
+        ? completedStates.reduce((sum, name) => sum + (lv.states[name] ?? 0), 0)
+        : Object.entries(lv.states)
+            .filter(([name]) => ['done', 'completed', 'closed', 'resolved'].includes(name.toLowerCase()))
+            .reduce((sum, [, cnt]) => sum + cnt, 0);
+      const inProgressStates = typeDefs
+        .filter((d) => d.category === 'InProgress')
+        .map((d) => d.name);
+      const inProgressCount = inProgressStates.length > 0
+        ? inProgressStates.reduce((sum, name) => sum + (lv.states[name] ?? 0), 0)
+        : Object.entries(lv.states)
+            .filter(([name]) => ['doing', 'started', 'active', 'committed', 'in progress'].includes(name.toLowerCase()))
+            .reduce((sum, [, cnt]) => sum + cnt, 0);
+
       badges.push(
         <span key="prog" className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-[--color-surface] border border-[--color-border] text-[--color-text2]">
           <span className="flex gap-px h-1.5 w-12 rounded overflow-hidden bg-[--color-border]">
-            {lv.Done > 0 && <span className="bg-[--color-green]" style={{ width: `${Math.round((lv.Done / total) * 100)}%` }} />}
-            {lv.Doing > 0 && <span className="bg-[--color-yellow]" style={{ width: `${Math.round((lv.Doing / total) * 100)}%` }} />}
+            {completedCount > 0 && <span style={{ width: `${Math.round((completedCount / total) * 100)}%`, backgroundColor: '#3fb950' }} />}
+            {inProgressCount > 0 && <span style={{ width: `${Math.round((inProgressCount / total) * 100)}%`, backgroundColor: '#58a6ff' }} />}
           </span>
-          {lv.Done}/{total}
+          {completedCount}/{total}
         </span>,
       );
     }

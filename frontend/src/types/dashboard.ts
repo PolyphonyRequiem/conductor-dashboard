@@ -99,7 +99,10 @@ export interface HierarchyData {
   focus: HierarchyFocus;
   levels: HierarchyLevel[];
   ancestors: HierarchyAncestor[];
-  progress?: { done: number; doing: number; todo: number };
+  /** State definitions per work item type from twig DB process_types */
+  type_defs?: Record<string, TypeStateDef[]>;
+  /** Hex color per work item type name (e.g. Epic→"E06C00") */
+  type_colors?: Record<string, string>;
 }
 
 export interface HierarchyFocus {
@@ -109,11 +112,11 @@ export interface HierarchyFocus {
   state: string;
 }
 
+/** Per-level breakdown with raw state counts */
 export interface HierarchyLevel {
   type: string;
-  'To Do': number;
-  Doing: number;
-  Done: number;
+  /** Raw state counts: e.g. {"To Do": 3, "Doing": 1, "Done": 5} */
+  states: Record<string, number>;
   total: number;
 }
 
@@ -122,6 +125,13 @@ export interface HierarchyAncestor {
   type: string;
   title: string;
   state: string;
+}
+
+/** State definition from twig DB process_types.states_json */
+export interface TypeStateDef {
+  name: string;
+  category: 'Proposed' | 'InProgress' | 'Completed' | 'Removed';
+  color: string; // hex without #
 }
 
 export interface CostSummary {

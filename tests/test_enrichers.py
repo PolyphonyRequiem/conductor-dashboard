@@ -116,14 +116,18 @@ class TestAdoEnricher:
         assert len(result["levels"]) == 2  # Issue + Task
 
         issue_level = next(l for l in result["levels"] if l["type"] == "Issue")
-        assert issue_level["Done"] == 1
-        assert issue_level["To Do"] == 1
+        assert issue_level["states"]["Done"] == 1
+        assert issue_level["states"]["To Do"] == 1
         assert issue_level["total"] == 2
 
         task_level = next(l for l in result["levels"] if l["type"] == "Task")
-        assert task_level["Done"] == 1
-        assert task_level["Doing"] == 1
+        assert task_level["states"]["Done"] == 1
+        assert task_level["states"]["Doing"] == 1
         assert task_level["total"] == 2
+
+        # type_defs and type_colors should be present (may be empty if no process_types table)
+        assert "type_defs" in result
+        assert "type_colors" in result
 
     def test_hierarchy_missing_item_returns_none(self, tmp_path: Path):
         _hierarchy_cache.clear()

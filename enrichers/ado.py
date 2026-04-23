@@ -237,6 +237,26 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
             )
             SELECT type, state, COUNT(*) FROM descendants GROUP BY type, state
         """, (wid,)).fetchall()
+
+        # Load process type definitions (state names, colors, categories)
+        type_defs: dict[str, list[dict]] = {}
+        type_colors: dict[str, str] = {}
+        try:
+            pt_rows = cur.execute(
+                "SELECT type_name, states_json, color_hex, icon_id FROM process_types"
+            ).fetchall()
+            for pt_name, states_json, color_hex, _icon in pt_rows:
+                if states_json:
+                    type_defs[pt_name] = json.loads(states_json)
+                if color_hex:
+                    # Strip 'FF' alpha prefix if present (e.g. 'FF339947' -> '339947')
+                    c = color_hex.lstrip("#")
+                    if len(c) == 8 and c[:2].upper() == "FF":
+                        c = c[2:]
+                    type_colors[pt_name] = c
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
+            pass  # Older DBs may not have process_types
+
         conn.close()
 
         level_map: dict[str, dict[str, int]] = {}
@@ -253,9 +273,7 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
                 total = sum(counts.values())
                 levels.append({
                     "type": lvl,
-                    "To Do": counts.get("To Do", 0) + counts.get("Proposed", 0),
-                    "Doing": counts.get("Doing", 0) + counts.get("Started", 0) + counts.get("Active", 0),
-                    "Done": counts.get("Done", 0) + counts.get("Completed", 0) + counts.get("Closed", 0) + counts.get("Resolved", 0),
+                    "states": counts,  # Raw state counts: {"To Do": 3, "Doing": 1, ...}
                     "total": total,
                 })
                 seen.add(lvl)
@@ -264,13 +282,17 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
                 total = sum(counts.values())
                 levels.append({
                     "type": lvl,
-                    "To Do": counts.get("To Do", 0) + counts.get("Proposed", 0),
-                    "Doing": counts.get("Doing", 0) + counts.get("Started", 0) + counts.get("Active", 0),
-                    "Done": counts.get("Done", 0) + counts.get("Completed", 0) + counts.get("Closed", 0) + counts.get("Resolved", 0),
+                    "states": counts,
                     "total": total,
                 })
 
-        result = {"focus": focus, "levels": levels, "ancestors": ancestors}
+        result = {
+            "focus": focus,
+            "levels": levels,
+            "ancestors": ancestors,
+            "type_defs": type_defs,     # State definitions per type
+            "type_colors": type_colors,  # Hex color per type name
+        }
     except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError):
         result = None
 
