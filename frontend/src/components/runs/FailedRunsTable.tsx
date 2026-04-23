@@ -1,8 +1,8 @@
 import { ChevronRight } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { RunDetailPanel } from './RunDetailPanel';
+import { ActionButton } from '@/components/shared/ActionButton';
 import { actionInvestigate, actionRestart } from '@/lib/api';
-import { toast } from '@/components/shared/Toast';
 import type { RunData } from '@/types/dashboard';
 
 interface Props {
@@ -97,27 +97,20 @@ function FailedRow({ run, isExpanded, isReviewed, onToggleExpand, onToggleReview
         <td className="px-3 py-2 text-right">{run.cost_str}</td>
         <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
           <div className="flex gap-1 justify-end">
-            <button
-              onClick={async () => {
-                const result = await actionInvestigate(run.log_file);
-                toast(result.error ? `❌ ${result.error}` : '🔍 Investigation launched', result.error ? 'err' : 'ok');
-              }}
-              className="text-xs px-2 py-0.5 rounded border border-yellow-600/40 text-yellow-400 hover:bg-yellow-900/20"
-            >
-              Investigate
-            </button>
-            <button
-              onClick={async () => {
-                const result = await actionRestart(run.log_file);
-                toast(
-                  result.error ? `❌ ${result.error}` : `🔄 Restart launched: ${result.workflow}`,
-                  result.error ? 'err' : 'ok',
-                );
-              }}
-              className="text-xs px-2 py-0.5 rounded border border-blue-600/40 text-blue-400 hover:bg-blue-900/20"
-            >
-              Restart
-            </button>
+            <ActionButton
+              label="Investigate"
+              loadingLabel="Launching..."
+              colorClass="border-yellow-600/40 text-yellow-400 hover:bg-yellow-900/20"
+              onClick={() => actionInvestigate(run.log_file)}
+              successMessage="🔍 Investigation launched"
+            />
+            <ActionButton
+              label="Restart"
+              loadingLabel="Starting..."
+              colorClass="border-blue-600/40 text-blue-400 hover:bg-blue-900/20"
+              onClick={() => actionRestart(run.log_file)}
+              successMessage="🔄 Restart launched"
+            />
             <button
               onClick={onToggleReviewed}
               className="text-xs px-2 py-0.5 rounded border border-[--color-border] text-[--color-text2] hover:bg-[--color-surface-hover]"

@@ -1,8 +1,8 @@
 import { ChevronRight } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { RunDetailPanel } from './RunDetailPanel';
+import { ActionButton } from '@/components/shared/ActionButton';
 import { actionReview } from '@/lib/api';
-import { toast } from '@/components/shared/Toast';
 import type { RunData } from '@/types/dashboard';
 
 interface Props {
@@ -61,10 +61,7 @@ export function CompletedRunsTable({ runs }: Props) {
                   isReviewed={isReviewed}
                   onToggleExpand={() => toggleExpand(key)}
                   onToggleReviewed={() => toggleReviewed(r.log_file)}
-                  onReview={r.review_available ? async () => {
-                    const result = await actionReview(r.log_file);
-                    toast(result.error ? `❌ ${result.error}` : '📋 Review launched', result.error ? 'err' : 'ok');
-                  } : undefined}
+                  showReviewAction={r.review_available}
                 />
               );
             })}
@@ -76,7 +73,7 @@ export function CompletedRunsTable({ runs }: Props) {
 }
 
 function RunRow({
-  run, expandKey: _expandKey, isExpanded, isReviewed, onToggleExpand, onToggleReviewed, onReview,
+  run, expandKey: _expandKey, isExpanded, isReviewed, onToggleExpand, onToggleReviewed, showReviewAction,
 }: {
   run: RunData;
   expandKey: string;
@@ -84,8 +81,8 @@ function RunRow({
   isReviewed: boolean;
   onToggleExpand: () => void;
   onToggleReviewed: () => void;
-  onReview?: () => void;
-}) {
+  showReviewAction: boolean;
+}){
   return (
     <>
       <tr
@@ -102,10 +99,14 @@ function RunRow({
         <td className="px-3 py-2 text-right">{run.tokens_str}</td>
         <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
           <div className="flex gap-1 justify-end">
-            {onReview && (
-              <button onClick={onReview} className="text-xs px-2 py-0.5 rounded border border-green-600/40 text-green-400 hover:bg-green-900/20">
-                Review
-              </button>
+            {showReviewAction && (
+              <ActionButton
+                label="Review"
+                loadingLabel="Launching..."
+                colorClass="border-green-600/40 text-green-400 hover:bg-green-900/20"
+                onClick={() => actionReview(run.log_file)}
+                successMessage="📋 Review launched"
+              />
             )}
             <button onClick={onToggleReviewed} className="text-xs px-2 py-0.5 rounded border border-[--color-border] text-[--color-text2] hover:bg-[--color-surface-hover]">
               {isReviewed ? 'Unmark' : 'Reviewed'}

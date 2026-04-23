@@ -27,7 +27,7 @@ from typing import Any
 import asyncio
 import hashlib
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -2204,6 +2204,67 @@ async def api_events(request: Request, reviewed: str = ""):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.websocket("/api/run/{log_file:path}/ws")
+async def ws_proxy(websocket: WebSocket, log_file: str):
+    """Proxy WebSocket to a running conductor instance's /ws endpoint.
+
+    Looks up the dashboard_port for the given log_file, then bridges
+    messages between the browser and the conductor instance.
+    """
+    import websockets  # type: ignore[import-untyped]
+    import urllib.parse
+
+    await websocket.accept()
+
+    # Find the dashboard port for this run
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, lambda: _compute_dashboard(set()))
+
+    target_port = None
+    for section in ("active_runs", "completed_runs", "failed_runs"):
+        for run in data.get(section, []):
+            if run.get("log_file") == urllib.parse.unquote(log_file):
+                target_port = run.get("dashboard_port")
+                break
+        if target_port:
+            break
+
+    if not target_port:
+        await websocket.close(code=4004, reason="No conductor instance found for this run")
+        return
+
+    target_url = f"ws://localhost:{target_port}/ws"
+
+    try:
+        async with websockets.connect(target_url) as upstream:
+            async def forward_to_browser():
+                try:
+                    async for msg in upstream:
+                        await websocket.send_text(msg if isinstance(msg, str) else msg.decode())
+                except Exception:
+                    pass
+
+            async def forward_to_conductor():
+                try:
+                    while True:
+                        msg = await websocket.receive_text()
+                        await upstream.send(msg)
+                except (WebSocketDisconnect, Exception):
+                    pass
+
+            # Run both directions concurrently
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(forward_to_browser()),
+                 asyncio.create_task(forward_to_conductor())],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+
+    except Exception:
+        await websocket.close(code=4002, reason="Cannot connect to conductor instance")
 
 
 def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],

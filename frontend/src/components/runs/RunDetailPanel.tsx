@@ -1,5 +1,7 @@
 import type { RunData } from '@/types/dashboard';
 import { fmtCost, fmtTokens, fmtDuration } from '@/lib/format';
+import { useConductorWs } from '@/hooks/use-conductor-ws';
+import { EmbeddedWorkflowGraph } from '@/components/graph/EmbeddedWorkflowGraph';
 
 interface Props {
   run: RunData;
@@ -8,6 +10,13 @@ interface Props {
 export function RunDetailPanel({ run }: Props) {
   const hierarchy = run.hierarchy;
   const subworkflows = run.subworkflows || [];
+  const isLive = run.process_alive && !!run.dashboard_port;
+
+  // Connect to conductor WS for live graph updates
+  const { events, connected } = useConductorWs({
+    logFile: run.log_file,
+    enabled: isLive,
+  });
 
   return (
     <div className="border-t border-[--color-border] px-4 py-3 text-sm space-y-3">
@@ -94,6 +103,17 @@ export function RunDetailPanel({ run }: Props) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Embedded Workflow Graph (live runs only) */}
+      {isLive && events.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-[--color-text2] mb-1">
+            <span>Workflow Graph</span>
+            {connected && <span className="w-1.5 h-1.5 rounded-full bg-[--color-green] animate-pulse" />}
+          </div>
+          <EmbeddedWorkflowGraph events={events} height={300} />
         </div>
       )}
 

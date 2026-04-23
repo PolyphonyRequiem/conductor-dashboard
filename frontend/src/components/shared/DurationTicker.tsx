@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fmtDuration } from '@/lib/format';
 
 interface Props {
@@ -6,17 +6,30 @@ interface Props {
   className?: string;
 }
 
-/** Live-updating duration ticker for active runs */
+/** Live-updating duration ticker using requestAnimationFrame for smooth updates */
 export function DurationTicker({ startedAt, className }: Props) {
-  const [, setTick] = useState(0);
+  const [display, setDisplay] = useState('');
+  const rafRef = useRef<number>(0);
+  const lastStr = useRef('');
 
   useEffect(() => {
     if (!startedAt) return;
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
+
+    function tick() {
+      const elapsed = Date.now() / 1000 - startedAt;
+      const str = fmtDuration(elapsed);
+      // Only update state when the string actually changes (every ~1s)
+      if (str !== lastStr.current) {
+        lastStr.current = str;
+        setDisplay(str);
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
   }, [startedAt]);
 
   if (!startedAt) return null;
-  const elapsed = Date.now() / 1000 - startedAt;
-  return <span className={className}>{fmtDuration(elapsed)}</span>;
+  return <span className={className}>{display}</span>;
 }
