@@ -1059,31 +1059,91 @@ a:hover { text-decoration: underline; }
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     font-size: 0.85rem;
 }
 .run-card-header:hover { background: #1c2128; }
-.run-name-block { min-width: 180px; flex-shrink: 0; }
-.agent-scroll {
+
+/* Powerline breadcrumb chain */
+.powerline { display: flex; align-items: stretch; flex-shrink: 0; }
+.pl-seg {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 5px 12px 4px 14px;
+    background: #1c2128;
+    position: relative;
+    min-width: 100px;
+}
+.pl-seg:first-child { border-radius: 4px 0 0 4px; padding-left: 10px; }
+.pl-seg:last-child { border-radius: 0 4px 4px 0; }
+.pl-seg:only-child { border-radius: 4px; }
+/* Triangle arrow between segments */
+.pl-seg + .pl-seg { margin-left: 14px; }
+.pl-seg + .pl-seg::before {
+    content: '';
+    position: absolute;
+    left: -14px;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    height: 0;
+    border-top: 18px solid transparent;
+    border-bottom: 18px solid transparent;
+    border-left: 14px solid #1c2128;
+}
+/* Filled arrow on the preceding segment */
+.pl-arrow {
+    position: absolute;
+    right: -14px;
+    top: 0;
+    bottom: 0;
+    width: 14px;
+    z-index: 1;
+    overflow: hidden;
+}
+.pl-arrow::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    border-top: 18px solid transparent;
+    border-bottom: 18px solid transparent;
+    border-left: 14px solid #1c2128;
+}
+.pl-seg-name { font-size: 0.82rem; font-weight: 500; color: var(--text); white-space: nowrap; }
+.pl-seg-agent {
     overflow: hidden;
     white-space: nowrap;
-    max-width: 320px;
-    min-width: 180px;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: var(--text2);
-    margin-top: 2px;
-    mask-image: linear-gradient(to right, transparent 0%, black 4%, black 88%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 4%, black 88%, transparent 100%);
+    max-width: 180px;
+    min-width: 100px;
+    height: 1.1em;
+    margin-top: 1px;
 }
-.agent-scroll-text {
+.pl-seg-agent-text {
     display: inline-block;
-    animation: agent-marquee 12s linear infinite;
-    padding-left: 100%;
+    white-space: nowrap;
 }
-@keyframes agent-marquee {
+.pl-seg-agent.scrolling {
+    mask-image: linear-gradient(to right, black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
+.pl-seg-agent.scrolling .pl-seg-agent-text {
+    animation: pl-scroll 6s linear infinite;
+}
+@keyframes pl-scroll {
     0%   { transform: translateX(0); }
-    100% { transform: translateX(-100%); }
+    80%  { transform: translateX(calc(-100% + 180px)); }
+    85%  { transform: translateX(calc(-100% + 180px)); opacity: 1; }
+    90%  { opacity: 0; }
+    91%  { transform: translateX(0); opacity: 0; }
+    100% { opacity: 1; }
 }
+
 .status-label {
     padding: 2px 8px;
     border-radius: 4px;
@@ -1391,7 +1451,7 @@ function renderRunCard(r, i, keyPrefix) {
         var gateClass = r.gate_waiting ? ' gate-waiting' : '';
         if (isAbandoned) gateClass += ' abandoned';
 
-        // Compact status label (replaces verbose agent status)
+        // Compact status label
         var statusLabel;
         if (r.gate_waiting) {
             if (isAbandoned) {
@@ -1407,26 +1467,20 @@ function renderRunCard(r, i, keyPrefix) {
             statusLabel = '<span class="status-label idle">Idle</span>';
         }
 
-        // Scrolling agent name for the name block
-        var agentScroll = '';
-        if (r.current_agent) {
-            var atype = r.current_agent_type ? ' ('+r.current_agent_type+')' : '';
-            agentScroll = esc(r.current_agent) + esc(atype);
-        } else if (isAbandoned && r.current_agent) {
-            agentScroll = esc(r.current_agent);
-        } else {
-            agentScroll = '';
-        }
-
-        // Composition breadcrumb (show active subworkflow chain)
-        var subBreadcrumb = '';
-        if (r.subworkflows && r.subworkflows.length > 0) {
-            var running = r.subworkflows.filter(function(s) { return s.status === 'running'; });
-            if (running.length > 0) {
-                var last = running[running.length - 1];
-                var swName = last.workflow.replace('./', '').replace('.yaml', '');
-                subBreadcrumb = ' <span style="color:var(--text2)">\\u203A</span> <span style="color:var(--accent);font-size:0.8rem">' + esc(swName) + '</span>';
-            }
+        // Build powerline breadcrumb chain: root workflow + running subworkflows
+        var plSegments = [];
+        var runningSubs = (r.subworkflows || []).filter(function(s) { return s.status === 'running'; });
+        // Root segment: show current_agent only if no running subworkflows,
+        // otherwise the root agent handed off to a child
+        var rootAgent = runningSubs.length === 0 ? (r.current_agent || '') : '';
+        var rootAgentType = rootAgent && r.current_agent_type ? ' ('+r.current_agent_type+')' : '';
+        plSegments.push({ name: r.name, agent: rootAgent + rootAgentType });
+        for (var si = 0; si < runningSubs.length; si++) {
+            var sw = runningSubs[si];
+            var swName = (sw.workflow || '').replace('./', '').replace('.yaml', '');
+            // Last running subworkflow gets the current active agent
+            var swAgent = (si === runningSubs.length - 1) ? (r.current_agent || sw.agent || '') : (sw.agent || '');
+            plSegments.push({ name: swName, agent: swAgent });
         }
 
         var wtHtml = worktreeBadge(r);
@@ -1436,10 +1490,16 @@ function renderRunCard(r, i, keyPrefix) {
         // --- Row 1: Workflow identity + runtime info ---
         html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+jsEsc(key)+'\\') ">';
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
-        html += '<div class="run-name-block">';
-        html += '<span class="wf-name">'+esc(r.name)+'</span>' + subBreadcrumb;
-        if (agentScroll) {
-            html += '<div class="agent-scroll"><span class="agent-scroll-text">'+agentScroll+'</span></div>';
+        html += '<div class="powerline">';
+        for (var pi = 0; pi < plSegments.length; pi++) {
+            var seg = plSegments[pi];
+            html += '<div class="pl-seg">';
+            html += '<div class="pl-seg-name">'+esc(seg.name)+'</div>';
+            if (seg.agent) {
+                html += '<div class="pl-seg-agent"><span class="pl-seg-agent-text">'+esc(seg.agent)+'</span></div>';
+            }
+            if (pi < plSegments.length - 1) html += '<div class="pl-arrow"></div>';
+            html += '</div>';
         }
         html += '</div>';
         html += wtHtml;
@@ -1866,6 +1926,21 @@ function renderAll() {
     renderCompletedRuns(dashboardData.completed_runs);
     renderFailedRuns(dashboardData.failed_runs);
     renderMetrics();
+    initAgentScrollers();
+}
+
+function initAgentScrollers() {
+    var els = document.querySelectorAll('.pl-seg-agent');
+    for (var i = 0; i < els.length; i++) {
+        var container = els[i];
+        var text = container.querySelector('.pl-seg-agent-text');
+        if (!text) continue;
+        if (text.scrollWidth > container.clientWidth) {
+            container.classList.add('scrolling');
+        } else {
+            container.classList.remove('scrolling');
+        }
+    }
 }
 
 function renderAbandonedRuns(runs) {
