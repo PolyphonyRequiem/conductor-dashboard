@@ -2885,6 +2885,13 @@ def main():
         assets_dir = _FRONTEND_DIST / "assets"
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+        # Serve favicon from dist root
+        favicon_path = _FRONTEND_DIST / "favicon.svg"
+        if favicon_path.exists():
+            from starlette.responses import FileResponse as _FileResponse
+            @app.get("/favicon.svg", include_in_schema=False)
+            async def _favicon():
+                return _FileResponse(str(favicon_path), media_type="image/svg+xml")
         print(f"   Frontend:     {_FRONTEND_DIST} (React)")
     else:
         print(f"   Frontend:     inline (legacy)")

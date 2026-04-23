@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, GitBranch, Hash, DollarSign, Zap, LayoutDashboard } from 'lucide-react';
+import { ChevronRight, ExternalLink, GitBranch, Hash, DollarSign, Zap } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
@@ -176,11 +176,16 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
               href={run.dashboard_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-1 rounded hover:bg-[--color-accent]/20 text-[--color-accent] transition-colors"
+              className="inline-flex items-center gap-1 px-1.5 py-1 rounded hover:bg-[--color-accent]/20 text-[--color-accent] transition-colors"
               title={`Conductor UI :${run.dashboard_port}`}
               onClick={(e) => e.stopPropagation()}
             >
-              <LayoutDashboard size={14} />
+              <svg viewBox="0 0 64 64" className="w-3.5 h-3.5">
+                <line x1="16" y1="48" x2="44" y2="14" stroke="currentColor" strokeWidth="5" strokeLinecap="round"/>
+                <circle cx="44" cy="14" r="4" fill="#3fb950"/>
+                <path d="M46 10 Q54 8 52 18" fill="none" stroke="#3fb950" strokeWidth="2.5" strokeLinecap="round" opacity="0.8"/>
+              </svg>
+              <ExternalLink size={11} className="opacity-60" />
             </a>
           )}
         </div>
