@@ -1064,70 +1064,64 @@ a:hover { text-decoration: underline; }
 }
 .run-card-header:hover { background: #1c2128; }
 
-/* Powerline breadcrumb chain */
+/* Powerline breadcrumb chain — clip-path approach for seamless chevrons */
 .powerline { display: flex; align-items: stretch; flex-shrink: 0; }
 .pl-seg {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 16px 4px 12px;
+    gap: 5px;
+    padding: 4px 14px 4px 12px;
     background: #2a3545;
-    position: relative;
     white-space: nowrap;
     font-size: 0.82rem;
     font-weight: 500;
     color: #8ba4c0;
-}
-.pl-seg:first-child { border-radius: 4px 0 0 4px; padding-left: 10px; }
-.pl-seg:last-child { border-radius: 0 4px 4px 0; }
-.pl-seg:only-child { border-radius: 4px; }
-.pl-seg + .pl-seg { margin-left: 14px; }
-.pl-seg + .pl-seg::before {
-    content: '';
-    position: absolute;
-    left: -14px;
-    top: 0;
-    bottom: 0;
-    border-top: 16px solid transparent;
-    border-bottom: 16px solid transparent;
-    border-left: 14px solid #2a3545;
-}
-.pl-arrow {
-    position: absolute;
-    right: -14px;
-    top: 0;
-    bottom: 0;
-    width: 14px;
+    /* Clip-path: flat left, arrow right. 10px arrow depth. */
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%);
+    margin-right: -10px;
+    position: relative;
     z-index: 1;
-    overflow: hidden;
 }
-.pl-arrow::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    border-top: 16px solid transparent;
-    border-bottom: 16px solid transparent;
-    border-left: 14px solid #2a3545;
+/* Segments after the first get an inset left to show previous seg's arrow color */
+.pl-seg + .pl-seg {
+    padding-left: 22px;
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 10px 50%);
 }
-/* Active (last) segment: oscillating blue */
+/* First segment: rounded left cap */
+.pl-seg:first-child { border-radius: 4px 0 0 4px; padding-left: 10px; }
+/* Last segment: rounded right cap, no arrow */
+.pl-seg:last-child {
+    clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 10px 50%);
+    padding-right: 12px;
+    margin-right: 0;
+}
+.pl-seg:first-child:last-child {
+    clip-path: polygon(0 4px, 4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px));
+    padding-left: 10px;
+    border-radius: 4px;
+}
+/* Stacking: later segments render on top */
+.pl-seg:nth-child(1) { z-index: 5; }
+.pl-seg:nth-child(2) { z-index: 4; }
+.pl-seg:nth-child(3) { z-index: 3; }
+.pl-seg:nth-child(4) { z-index: 2; }
+.pl-seg:nth-child(5) { z-index: 1; }
+/* Active segment: oscillating blue — background animates and clip-path follows */
 .pl-seg.active {
     background: #1a3a5c;
+    color: #7ab8e8;
     animation: pl-active-pulse 2.5s ease-in-out infinite;
 }
-.pl-seg.active + .pl-seg::before { border-left-color: #1a3a5c; }
-.pl-seg.active .pl-arrow::after { border-left-color: #1a3a5c; }
 @keyframes pl-active-pulse {
     0%, 100% { background: #1a3a5c; color: #7ab8e8; }
     50% { background: #1e4470; color: #58a6ff; }
 }
-/* Agent name segment: oscillating green */
+/* Agent segment: oscillating green */
 .pl-seg.agent-seg {
     background: #1a2e1a;
+    color: #4eda8a;
     animation: pl-agent-pulse 2.5s ease-in-out infinite;
 }
-.pl-seg.agent-seg + .pl-seg::before { border-left-color: #1a2e1a; }
-.pl-seg.agent-seg .pl-arrow::after { border-left-color: #1a2e1a; }
 @keyframes pl-agent-pulse {
     0%, 100% { background: #1a2e1a; color: #4eda8a; }
     50% { background: #1e3a20; color: #3fb950; }
@@ -1499,7 +1493,6 @@ function renderRunCard(r, i, keyPrefix) {
             html += '<div class="pl-seg'+segClass+'">';
             html += svgLayers;
             html += '<span class="pl-seg-name">'+esc(seg.name)+'</span>';
-            if (pi < plSegments.length - 1 || activeAgent) html += '<div class="pl-arrow"></div>';
             html += '</div>';
         }
         // Agent segment (final, green oscillating)
