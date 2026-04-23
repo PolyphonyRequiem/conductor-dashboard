@@ -219,7 +219,7 @@ def _extract_purpose(prompt: str, max_len: int = 120) -> str:
         if not line or line.startswith("#") or line.startswith("---"):
             continue
         # Skip generic instruction lines
-        if any(skip in line.lower() for skip in ["gather context", "you are", "your task", "phase 1", "phase 2"]):
+        if any(skip in line.lower() for skip in ["gather context", "you are", "your task", "phase 1", "phase 2", "check if"]):
             continue
         return line[:max_len]
     return ""
@@ -1063,6 +1063,37 @@ a:hover { text-decoration: underline; }
     font-size: 0.85rem;
 }
 .run-card-header:hover { background: #1c2128; }
+.run-name-block { min-width: 180px; flex-shrink: 0; }
+.agent-scroll {
+    overflow: hidden;
+    white-space: nowrap;
+    max-width: 320px;
+    min-width: 180px;
+    font-size: 0.75rem;
+    color: var(--text2);
+    margin-top: 2px;
+    mask-image: linear-gradient(to right, transparent 0%, black 4%, black 88%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 4%, black 88%, transparent 100%);
+}
+.agent-scroll-text {
+    display: inline-block;
+    animation: agent-marquee 12s linear infinite;
+    padding-left: 100%;
+}
+@keyframes agent-marquee {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-100%); }
+}
+.status-label {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+.status-label.running { background: #238636aa; color: var(--green); border: 1px solid #23863680; }
+.status-label.idle { background: #388bfd20; color: var(--blue); border: 1px solid #388bfd40; }
+.status-label.gate { background: #d2992220; color: var(--yellow); border: 1px solid #d2992240; }
 .run-card-body {
     padding: 0 16px;
     max-height: 0;
@@ -1077,7 +1108,6 @@ a:hover { text-decoration: underline; }
 }
 .chevron { color: var(--text2); font-size: 0.75rem; transition: transform 0.2s; display: inline-block; }
 .chevron.open { transform: rotate(90deg); }
-.run-purpose { color: var(--text2); font-size: 0.75rem; font-weight: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 500px; display: inline-block; vertical-align: bottom; }
 
 /* Work item badge */
 .work-item { font-size: 0.82rem; }
@@ -1361,22 +1391,31 @@ function renderRunCard(r, i, keyPrefix) {
         var gateClass = r.gate_waiting ? ' gate-waiting' : '';
         if (isAbandoned) gateClass += ' abandoned';
 
-        // Agent status line
-        var agentStatus;
+        // Compact status label (replaces verbose agent status)
+        var statusLabel;
         if (r.gate_waiting) {
             if (isAbandoned) {
-                agentStatus = '&#128123; <span style="color:var(--red)">'+esc(r.gate_agent)+'</span> <span class="abandoned-badge">GATE ABANDONED</span>';
+                statusLabel = '<span class="abandoned-badge">GATE ABANDONED</span>';
             } else {
-                agentStatus = '<span class="gate-pulse">&#128678;</span> <span style="color:var(--yellow)">'+esc(r.gate_agent)+'</span> <span class="err-type" style="background:#d2992220">GATE WAITING</span>';
+                statusLabel = '<span class="gate-pulse">&#128678;</span> <span class="status-label gate">Human Gate \\u2014 '+esc(r.gate_agent)+'</span>';
             }
         } else if (isAbandoned) {
-            var atype = r.current_agent_type ? ' <span style="color:var(--text2)">('+esc(r.current_agent_type)+')</span>' : '';
-            agentStatus = '&#128123; '+esc(r.current_agent || '\\u2014')+atype+' <span class="abandoned-badge">ABANDONED</span>';
+            statusLabel = '<span class="abandoned-badge">ABANDONED</span>';
         } else if (r.current_agent) {
-            var atype = r.current_agent_type ? ' <span style="color:var(--text2)">('+esc(r.current_agent_type)+')</span>' : '';
-            agentStatus = '&#9881;&#65039; '+esc(r.current_agent)+atype;
+            statusLabel = '<span class="status-label running">Running</span>';
         } else {
-            agentStatus = '<span style="color:var(--text2)">\\u2014</span>';
+            statusLabel = '<span class="status-label idle">Idle</span>';
+        }
+
+        // Scrolling agent name for the name block
+        var agentScroll = '';
+        if (r.current_agent) {
+            var atype = r.current_agent_type ? ' ('+r.current_agent_type+')' : '';
+            agentScroll = esc(r.current_agent) + esc(atype);
+        } else if (isAbandoned && r.current_agent) {
+            agentScroll = esc(r.current_agent);
+        } else {
+            agentScroll = '';
         }
 
         // Composition breadcrumb (show active subworkflow chain)
@@ -1397,9 +1436,12 @@ function renderRunCard(r, i, keyPrefix) {
         // --- Row 1: Workflow identity + runtime info ---
         html += '<div class="run-card-header" title="Click to expand details" onclick="toggleExpand(\\''+jsEsc(key)+'\\') ">';
         html += '<span class="chevron'+(isExpanded?' open':'')+'">&#9654;</span>';
-        html += '<span class="wf-name">'+esc(r.name);
-        if (r.purpose) html += '<br><span class="run-purpose">'+esc(r.purpose)+'</span>';
-        html += '</span>' + subBreadcrumb;
+        html += '<div class="run-name-block">';
+        html += '<span class="wf-name">'+esc(r.name)+'</span>' + subBreadcrumb;
+        if (agentScroll) {
+            html += '<div class="agent-scroll"><span class="agent-scroll-text">'+agentScroll+'</span></div>';
+        }
+        html += '</div>';
         html += wtHtml;
         // Elapsed: client-side ticking for running, static for terminal
         if (r.status === 'running' && r.started_at) {
@@ -1407,7 +1449,7 @@ function renderRunCard(r, i, keyPrefix) {
         } else {
             html += '<span style="color:var(--text2);margin-left:auto">'+esc(r.elapsed)+'</span>';
         }
-        html += '<span>'+agentStatus+'</span>';
+        html += '<span>'+statusLabel+'</span>';
         html += '<span>'+fmtCost(r.total_cost)+'</span>';
         if (r.dashboard_url) {
             html += '<a class="action-btn" href="'+esc(r.dashboard_url)+'" target="_blank" title="Open per-run conductor dashboard" onclick="event.stopPropagation()" style="margin-left:8px;text-decoration:none">&#128279; Dashboard</a>';
