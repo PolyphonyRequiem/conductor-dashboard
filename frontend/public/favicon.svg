@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="baton" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="100%" stop-color="#1f6feb"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7ee787"/>
+      <stop offset="100%" stop-color="#3fb950"/>
+    </linearGradient>
+  </defs>
+  <!-- Baton -->
+  <line x1="16" y1="48" x2="44" y2="14" stroke="url(#baton)" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- Baton tip -->
+  <circle cx="44" cy="14" r="4" fill="url(#glow)"/>
+  <!-- Signal arcs -->
+  <path d="M46 10 Q54 8 52 18" fill="none" stroke="#7ee787" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
+  <path d="M49 7 Q60 4 56 20" fill="none" stroke="#58a6ff" stroke-width="1.8" stroke-linecap="round" opacity="0.5"/>
+  <!-- Base nodes (orchestrated agents) -->
+  <circle cx="14" cy="50" r="3.5" fill="#58a6ff" opacity="0.7"/>
+  <circle cx="24" cy="54" r="2.5" fill="#da3633" opacity="0.6"/>
+  <circle cx="10" cy="40" r="2.5" fill="#d29922" opacity="0.6"/>
+</svg>
