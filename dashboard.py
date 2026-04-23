@@ -281,9 +281,11 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         for ad in run.agent_defs:
                             agent_type_map[ad.get("name", "")] = ad.get("type", "agent")
                         # Early work_item_id from metadata (injected at invocation time)
-                        mid = run.metadata.get("workitem_id") or run.metadata.get("input_work_item_id")
-                        if not run.work_item_id and mid:
-                            run.work_item_id = str(mid)
+                        for field in ("workitem_id", "work_item_id", "input_work_item_id"):
+                            mid = run.metadata.get(field)
+                            if mid and str(mid) != "{work_item_id}" and not str(mid).startswith("{"):
+                                run.work_item_id = str(mid)
+                                break
                     wf_depth += 1
 
                 elif etype == "agent_started":
@@ -2079,8 +2081,8 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
 
     # Best: metadata.cwd injected at invocation time
     meta_cwd = r.metadata.get("cwd")
-    if meta_cwd:
-        p = Path(meta_cwd.replace("/", os.sep))
+    if meta_cwd and "{" not in str(meta_cwd):
+        p = Path(str(meta_cwd).replace("/", os.sep))
         if p.exists():
             cwd = p
 
