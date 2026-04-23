@@ -1068,17 +1068,19 @@ a:hover { text-decoration: underline; }
 .powerline { display: flex; align-items: stretch; flex-shrink: 0; }
 .pl-seg {
     display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 5px 12px 4px 14px;
-    background: #1c2128;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 16px 4px 12px;
+    background: #2a3545;
     position: relative;
-    min-width: 100px;
+    white-space: nowrap;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #8ba4c0;
 }
 .pl-seg:first-child { border-radius: 4px 0 0 4px; padding-left: 10px; }
 .pl-seg:last-child { border-radius: 0 4px 4px 0; }
 .pl-seg:only-child { border-radius: 4px; }
-/* Triangle arrow between segments */
 .pl-seg + .pl-seg { margin-left: 14px; }
 .pl-seg + .pl-seg::before {
     content: '';
@@ -1086,13 +1088,10 @@ a:hover { text-decoration: underline; }
     left: -14px;
     top: 0;
     bottom: 0;
-    width: 0;
-    height: 0;
-    border-top: 18px solid transparent;
-    border-bottom: 18px solid transparent;
-    border-left: 14px solid #1c2128;
+    border-top: 16px solid transparent;
+    border-bottom: 16px solid transparent;
+    border-left: 14px solid #2a3545;
 }
-/* Filled arrow on the preceding segment */
 .pl-arrow {
     position: absolute;
     right: -14px;
@@ -1107,42 +1106,34 @@ a:hover { text-decoration: underline; }
     position: absolute;
     left: 0;
     top: 0;
-    width: 0;
-    height: 0;
-    border-top: 18px solid transparent;
-    border-bottom: 18px solid transparent;
-    border-left: 14px solid #1c2128;
+    border-top: 16px solid transparent;
+    border-bottom: 16px solid transparent;
+    border-left: 14px solid #2a3545;
 }
-.pl-seg-name { font-size: 0.82rem; font-weight: 500; color: var(--text); white-space: nowrap; }
-.pl-seg-agent {
-    overflow: hidden;
-    white-space: nowrap;
-    font-size: 0.7rem;
-    color: var(--text2);
-    max-width: 180px;
-    min-width: 100px;
-    height: 1.1em;
-    margin-top: 1px;
+/* Active (last) segment: oscillating blue */
+.pl-seg.active {
+    background: #1a3a5c;
+    animation: pl-active-pulse 2.5s ease-in-out infinite;
 }
-.pl-seg-agent-text {
-    display: inline-block;
-    white-space: nowrap;
+.pl-seg.active + .pl-seg::before { border-left-color: #1a3a5c; }
+.pl-seg.active .pl-arrow::after { border-left-color: #1a3a5c; }
+@keyframes pl-active-pulse {
+    0%, 100% { background: #1a3a5c; color: #7ab8e8; }
+    50% { background: #1e4470; color: #58a6ff; }
 }
-.pl-seg-agent.scrolling {
-    mask-image: linear-gradient(to right, black 85%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+/* Agent name segment: oscillating green */
+.pl-seg.agent-seg {
+    background: #1a2e1a;
+    animation: pl-agent-pulse 2.5s ease-in-out infinite;
 }
-.pl-seg-agent.scrolling .pl-seg-agent-text {
-    animation: pl-scroll 6s linear infinite;
+.pl-seg.agent-seg + .pl-seg::before { border-left-color: #1a2e1a; }
+.pl-seg.agent-seg .pl-arrow::after { border-left-color: #1a2e1a; }
+@keyframes pl-agent-pulse {
+    0%, 100% { background: #1a2e1a; color: #4eda8a; }
+    50% { background: #1e3a20; color: #3fb950; }
 }
-@keyframes pl-scroll {
-    0%   { transform: translateX(0); }
-    80%  { transform: translateX(calc(-100% + 180px)); }
-    85%  { transform: translateX(calc(-100% + 180px)); opacity: 1; }
-    90%  { opacity: 0; }
-    91%  { transform: translateX(0); opacity: 0; }
-    100% { opacity: 1; }
-}
+.pl-seg svg { flex-shrink: 0; }
+.pl-seg-name { }
 
 .status-label {
     padding: 2px 8px;
@@ -1467,21 +1458,32 @@ function renderRunCard(r, i, keyPrefix) {
             statusLabel = '<span class="status-label idle">Idle</span>';
         }
 
-        // Build powerline breadcrumb chain: root workflow + running subworkflows
+        // Lucide SVG icons matching conductor web app (14x14)
+        var svgBot = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
+        var svgShield = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>';
+        var svgTerminal = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>';
+        var svgLayers = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>';
+        function agentTypeIcon(atype) {
+            switch ((atype || '').toLowerCase()) {
+                case 'human_gate': return svgShield;
+                case 'script': return svgTerminal;
+                case 'workflow': return svgLayers;
+                default: return svgBot;
+            }
+        }
+
+        // Build powerline segments: workflows + active agent as final segment
         var plSegments = [];
         var runningSubs = (r.subworkflows || []).filter(function(s) { return s.status === 'running'; });
-        // Root segment: show current_agent only if no running subworkflows,
-        // otherwise the root agent handed off to a child
-        var rootAgent = runningSubs.length === 0 ? (r.current_agent || '') : '';
-        var rootAgentType = rootAgent && r.current_agent_type ? ' ('+r.current_agent_type+')' : '';
-        plSegments.push({ name: r.name, agent: rootAgent + rootAgentType });
+        plSegments.push({ name: r.name, type: 'workflow', isActive: runningSubs.length === 0 });
         for (var si = 0; si < runningSubs.length; si++) {
             var sw = runningSubs[si];
             var swName = (sw.workflow || '').replace('./', '').replace('.yaml', '');
-            // Last running subworkflow gets the current active agent
-            var swAgent = (si === runningSubs.length - 1) ? (r.current_agent || sw.agent || '') : (sw.agent || '');
-            plSegments.push({ name: swName, agent: swAgent });
+            plSegments.push({ name: swName, type: 'workflow', isActive: si === runningSubs.length - 1 });
         }
+        // Active agent as final segment
+        var activeAgent = r.current_agent || '';
+        var activeAgentType = r.current_agent_type || 'agent';
 
         var wtHtml = worktreeBadge(r);
 
@@ -1493,12 +1495,18 @@ function renderRunCard(r, i, keyPrefix) {
         html += '<div class="powerline">';
         for (var pi = 0; pi < plSegments.length; pi++) {
             var seg = plSegments[pi];
-            html += '<div class="pl-seg">';
-            html += '<div class="pl-seg-name">'+esc(seg.name)+'</div>';
-            if (seg.agent) {
-                html += '<div class="pl-seg-agent"><span class="pl-seg-agent-text">'+esc(seg.agent)+'</span></div>';
-            }
-            if (pi < plSegments.length - 1) html += '<div class="pl-arrow"></div>';
+            var segClass = seg.isActive ? ' active' : '';
+            html += '<div class="pl-seg'+segClass+'">';
+            html += svgLayers;
+            html += '<span class="pl-seg-name">'+esc(seg.name)+'</span>';
+            if (pi < plSegments.length - 1 || activeAgent) html += '<div class="pl-arrow"></div>';
+            html += '</div>';
+        }
+        // Agent segment (final, green oscillating)
+        if (activeAgent) {
+            html += '<div class="pl-seg agent-seg">';
+            html += agentTypeIcon(activeAgentType);
+            html += '<span class="pl-seg-name">'+esc(activeAgent)+'</span>';
             html += '</div>';
         }
         html += '</div>';
@@ -1926,21 +1934,6 @@ function renderAll() {
     renderCompletedRuns(dashboardData.completed_runs);
     renderFailedRuns(dashboardData.failed_runs);
     renderMetrics();
-    initAgentScrollers();
-}
-
-function initAgentScrollers() {
-    var els = document.querySelectorAll('.pl-seg-agent');
-    for (var i = 0; i < els.length; i++) {
-        var container = els[i];
-        var text = container.querySelector('.pl-seg-agent-text');
-        if (!text) continue;
-        if (text.scrollWidth > container.clientWidth) {
-            container.classList.add('scrolling');
-        } else {
-            container.classList.remove('scrolling');
-        }
-    }
 }
 
 function renderAbandonedRuns(runs) {
