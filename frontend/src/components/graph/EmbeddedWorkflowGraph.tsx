@@ -5,20 +5,44 @@ import '@xyflow/react/dist/style.css';
 import { nodeTypes } from './GraphNodes';
 import { buildGraphElements } from './graph-layout';
 import { processEvents } from './event-processor';
-import type { WorkflowEvent } from '@/types/events';
+import type { WorkflowEvent, GraphState } from '@/types/events';
 
 interface Props {
   events: WorkflowEvent[];
   height?: number;
+  /** When set, only show this agent + its predecessors + successors */
+  focusAgent?: string;
 }
 
-export function EmbeddedWorkflowGraph({ events, height = 350 }: Props) {
-  const graphState = useMemo(() => processEvents(events), [events]);
+/** Filter graph state to only show the focused agent's neighborhood */
+function filterToNeighborhood(state: GraphState, focus: string): GraphState {
+  // Find predecessors and successors from routes
+  const predecessors = new Set<string>();
+  const successors = new Set<string>();
+  for (const route of state.routes) {
+    if (route.to === focus) predecessors.add(route.from);
+    if (route.from === focus) successors.add(route.to);
+  }
+
+  const visible = new Set([focus, ...predecessors, ...successors]);
+
+  return {
+    ...state,
+    agents: state.agents.filter((a) => visible.has(a.name)),
+    routes: state.routes.filter((r) => visible.has(r.from) && visible.has(r.to)),
+    entryPoint: visible.has(state.entryPoint ?? '') ? state.entryPoint : null,
+  };
+}
+
+export function EmbeddedWorkflowGraph({ events, height = 350, focusAgent }: Props) {
+  const fullState = useMemo(() => processEvents(events), [events]);
+  const graphState = useMemo(
+    () => (focusAgent && fullState.nodes[focusAgent] ? filterToNeighborhood(fullState, focusAgent) : fullState),
+    [fullState, focusAgent],
+  );
   const { nodes, edges } = useMemo(() => buildGraphElements(graphState), [graphState]);
 
-  const onNodeClick: NodeMouseHandler = useCallback(() => {
-    // Future: show node detail tooltip
-  }, []);
+  const onNodeClick: NodeMouseHandler = useCallback(() => {}, []);
 
   if (nodes.length === 0) {
     return (

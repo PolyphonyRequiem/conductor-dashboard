@@ -1,7 +1,9 @@
+import { ExternalLink, GitBranch, Copy, Layers } from 'lucide-react';
 import type { RunData } from '@/types/dashboard';
 import { fmtCost, fmtTokens, fmtDuration } from '@/lib/format';
 import { useConductorWs } from '@/hooks/use-conductor-ws';
 import { EmbeddedWorkflowGraph } from '@/components/graph/EmbeddedWorkflowGraph';
+import { toast } from '@/components/shared/Toast';
 
 interface Props {
   run: RunData;
@@ -12,76 +14,145 @@ export function RunDetailPanel({ run }: Props) {
   const subworkflows = run.subworkflows || [];
   const isLive = run.process_alive && !!run.dashboard_port;
 
-  // Connect to conductor WS for live graph updates
   const { events, connected } = useConductorWs({
     logFile: run.log_file,
     enabled: isLive,
   });
 
+  const copyReplayCmd = () => {
+    if (run.replay_cmd) {
+      navigator.clipboard.writeText(run.replay_cmd);
+      toast('📋 Replay command copied', 'ok');
+    }
+  };
+
   return (
-    <div className="border-t border-[--color-border] px-4 py-3 text-sm space-y-3">
-      {/* Work Item */}
-      {run.work_item_id && (
-        <div className="flex items-center gap-2">
-          <span className="text-[--color-text2] text-xs uppercase tracking-wide">Work Item</span>
-          {run.work_item_url ? (
-            <a
-              href={run.work_item_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[--color-accent] hover:underline"
-            >
-              {run.work_item_type ? `[${run.work_item_type}] ` : ''}#{run.work_item_id}{run.work_item_title ? ` ${run.work_item_title}` : ''}
-            </a>
-          ) : (
-            <span>{run.work_item_type ? `[${run.work_item_type}] ` : ''}#{run.work_item_id}{run.work_item_title ? ` ${run.work_item_title}` : ''}</span>
-          )}
+    <div className="border-t border-[--color-border] px-4 py-3 text-sm space-y-4">
+      {/* Top action bar: Conductor UI + Replay */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {run.dashboard_url && (
+          <a
+            href={run.dashboard_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-[--color-accent]/10 border border-[--color-accent]/30 text-[--color-accent] hover:bg-[--color-accent]/20 transition-colors font-medium"
+          >
+            <ExternalLink size={12} />
+            Conductor UI :{run.dashboard_port}
+          </a>
+        )}
+        {run.replay_cmd && (
+          <button
+            onClick={copyReplayCmd}
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-[--color-surface] border border-[--color-border] text-[--color-text2] hover:bg-[--color-surface-hover] transition-colors"
+          >
+            <Copy size={12} />
+            Copy Replay Cmd
+          </button>
+        )}
+        {run.cwd && (
+          <span className="text-xs text-[--color-text2] truncate max-w-[300px]" title={run.cwd}>
+            📁 {run.cwd.split(/[\\/]/).slice(-2).join('/')}
+          </span>
+        )}
+      </div>
+
+      {/* Embedded Workflow Graph (live runs) */}
+      {isLive && events.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-[--color-text2] mb-1.5">
+            <span>Workflow Graph</span>
+            {connected && <span className="w-1.5 h-1.5 rounded-full bg-[--color-green] animate-pulse" />}
+          </div>
+          <EmbeddedWorkflowGraph events={events} height={280} focusAgent={run.current_agent} />
         </div>
       )}
 
-      {/* Hierarchy Progress */}
-      {hierarchy && hierarchy.progress && (
+      {/* Work item hierarchy details */}
+      {hierarchy && hierarchy.levels && hierarchy.levels.length > 0 && (
         <div>
-          <div className="flex gap-0.5 h-2 rounded overflow-hidden mb-1">
-            {hierarchy.progress.done > 0 && (
-              <div className="bg-[--color-green]" style={{ flex: hierarchy.progress.done }} />
-            )}
-            {hierarchy.progress.doing > 0 && (
-              <div className="bg-[--color-yellow]" style={{ flex: hierarchy.progress.doing }} />
-            )}
-            {hierarchy.progress.todo > 0 && (
-              <div className="bg-[--color-border]" style={{ flex: hierarchy.progress.todo }} />
-            )}
+          <div className="text-xs uppercase tracking-wide text-[--color-text2] mb-1.5">Work Item Hierarchy</div>
+          <div className="space-y-1">
+            {hierarchy.levels.map((level, i) => {
+              const stateColor =
+                level.state === 'Done' ? 'text-[--color-green]' :
+                level.state === 'Doing' ? 'text-[--color-yellow]' :
+                'text-[--color-text2]';
+              return (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="text-[--color-text2] min-w-[60px]">{level.type}</span>
+                  <span className="font-medium">#{level.id}</span>
+                  <span className="truncate text-[--color-text2]">{level.title}</span>
+                  <span className={`shrink-0 ${stateColor}`}>{level.state}</span>
+                </div>
+              );
+            })}
           </div>
-          <div className="text-xs text-[--color-text2]">
-            ✅ {hierarchy.progress.done} done · 🔧 {hierarchy.progress.doing} in progress · ○ {hierarchy.progress.todo} to do
-          </div>
+          {/* Progress bar (detailed) */}
+          {hierarchy.progress && (
+            <div className="mt-2">
+              <div className="flex gap-0.5 h-2 rounded overflow-hidden mb-1">
+                {hierarchy.progress.done > 0 && <div className="bg-[--color-green]" style={{ flex: hierarchy.progress.done }} />}
+                {hierarchy.progress.doing > 0 && <div className="bg-[--color-yellow]" style={{ flex: hierarchy.progress.doing }} />}
+                {hierarchy.progress.todo > 0 && <div className="bg-[--color-border]" style={{ flex: hierarchy.progress.todo }} />}
+              </div>
+              <div className="text-xs text-[--color-text2]">
+                ✅ {hierarchy.progress.done} done · 🔧 {hierarchy.progress.doing} in progress · ○ {hierarchy.progress.todo} to do
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Subworkflows */}
       {subworkflows.length > 0 && (
         <div>
-          <div className="text-xs uppercase tracking-wide text-[--color-text2] mb-1">Subworkflows</div>
-          <div className="font-mono text-xs space-y-0.5">
+          <div className="text-xs uppercase tracking-wide text-[--color-text2] mb-1.5">
+            <Layers size={12} className="inline mr-1" />
+            Subworkflows ({subworkflows.length})
+          </div>
+          <div className="grid grid-cols-[auto_auto_1fr_auto] gap-x-3 gap-y-0.5 text-xs font-mono">
             {subworkflows.map((sw, i) => (
-              <div key={i} className="flex gap-2">
-                <span className="text-[--color-text2]">{i === subworkflows.length - 1 ? '└─' : '├─'}</span>
+              <div key={i} className="contents">
                 <span>{sw.status === 'running' ? '🔄' : '✅'}</span>
                 <span className="text-[--color-accent]">{sw.workflow.replace('./', '').replace('.yaml', '')}</span>
-                {sw.item_key && <span className="text-[--color-text2]">[{sw.item_key}]</span>}
-                {sw.elapsed > 0 && <span className="text-[--color-text2]">{fmtDuration(sw.elapsed)}</span>}
+                <span className="text-[--color-text2] truncate">{sw.item_key ? `[${sw.item_key}]` : ''}</span>
+                <span className="text-[--color-text2] text-right tabular-nums">{sw.elapsed > 0 ? fmtDuration(sw.elapsed) : '—'}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Agent Summary */}
+      {/* Worktree details */}
+      {run.worktree && (run.worktree.branch || run.worktree.name) && (
+        <div className="flex items-center gap-3 text-xs text-[--color-text2]">
+          {run.worktree.name && (
+            <span className="flex items-center gap-1">
+              📦 <strong className="text-[--color-text]">{run.worktree.name}</strong>
+            </span>
+          )}
+          {run.worktree.branch && (
+            <span className="flex items-center gap-1">
+              <GitBranch size={11} className="text-[--color-green]" />
+              <span className="text-[--color-accent]">{run.worktree.branch}</span>
+            </span>
+          )}
+          {run.worktree.toplevel && (
+            <span className="truncate max-w-[200px]" title={run.worktree.toplevel}>
+              {run.worktree.toplevel}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Agent summary (compact, collapsible in future) */}
       {run.agents.length > 0 && (
-        <div>
-          <div className="text-xs uppercase tracking-wide text-[--color-text2] mb-1">Agents ({run.agent_count})</div>
-          <table className="w-full text-xs">
+        <details className="group">
+          <summary className="text-xs uppercase tracking-wide text-[--color-text2] cursor-pointer select-none hover:text-[--color-text]">
+            Agents ({run.agent_count}) · Cost: {run.cost_str} · Tokens: {run.tokens_str}
+          </summary>
+          <table className="w-full text-xs mt-1.5">
             <thead>
               <tr className="text-[--color-text2]">
                 <th className="text-left py-1">Name</th>
@@ -96,47 +167,14 @@ export function RunDetailPanel({ run }: Props) {
                 <tr key={i} className="border-t border-[--color-border]/50">
                   <td className="py-1">{a.name}</td>
                   <td className="py-1 text-[--color-text2]">{a.model}</td>
-                  <td className="py-1 text-right">{fmtDuration(a.elapsed)}</td>
-                  <td className="py-1 text-right">{fmtTokens(a.tokens)}</td>
-                  <td className="py-1 text-right">{fmtCost(a.cost_usd)}</td>
+                  <td className="py-1 text-right tabular-nums">{fmtDuration(a.elapsed)}</td>
+                  <td className="py-1 text-right tabular-nums">{fmtTokens(a.tokens)}</td>
+                  <td className="py-1 text-right tabular-nums">{fmtCost(a.cost_usd)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* Embedded Workflow Graph (live runs only) */}
-      {isLive && events.length > 0 && (
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-[--color-text2] mb-1">
-            <span>Workflow Graph</span>
-            {connected && <span className="w-1.5 h-1.5 rounded-full bg-[--color-green] animate-pulse" />}
-          </div>
-          <EmbeddedWorkflowGraph events={events} height={300} />
-        </div>
-      )}
-
-      {/* Dashboard link + Replay command */}
-      <div className="flex flex-wrap gap-4 text-xs text-[--color-text2]">
-        {run.dashboard_url && (
-          <a href={run.dashboard_url} target="_blank" rel="noopener noreferrer" className="text-[--color-accent] hover:underline">
-            Open Conductor UI →
-          </a>
-        )}
-        {run.replay_cmd && (
-          <code className="bg-[--color-bg] border border-[--color-border] rounded px-2 py-0.5 break-all select-all">
-            {run.replay_cmd}
-          </code>
-        )}
-      </div>
-
-      {/* Cost + Token totals */}
-      {(run.total_cost > 0 || run.total_tokens > 0) && (
-        <div className="flex gap-6 text-xs text-[--color-text2]">
-          <span>Cost: {run.cost_str}</span>
-          <span>Tokens: {run.tokens_str}</span>
-        </div>
+        </details>
       )}
     </div>
   );
