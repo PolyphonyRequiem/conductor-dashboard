@@ -1117,7 +1117,7 @@ a:hover { text-decoration: underline; }
 </head>
 <body>
 <h1>&#9889; Conductor Dashboard</h1>
-<p class="meta">Aggregated workflow status &bull; Auto-refreshes every 10s</p>
+<p class="meta">Aggregated workflow status &bull; Auto-refreshes every 5s</p>
 
 <div id="stats" class="stats"></div>
 
@@ -1325,26 +1325,26 @@ async function fetchDashboard() {
 // ---------------------------------------------------------------------------
 function renderStats(stats) {
     var el = document.getElementById('stats');
-    el.innerHTML =
+    var html =
         '<div class="stat"><div class="label">Active Now</div><div class="value yellow">'+stats.active+'</div></div>' +
         '<div class="stat"><div class="label">Gates Waiting</div><div class="value yellow">'+stats.gates_waiting+'</div></div>' +
         '<div class="stat"><div class="label">Abandoned</div><div class="value red">'+(stats.abandoned||0)+'</div></div>';
+    setHtmlIfChanged('stats', html);
 }
 
 // ---------------------------------------------------------------------------
 // Render: Active Runs (collapsible cards)
 // ---------------------------------------------------------------------------
 function renderActiveRuns(runs) {
-    var el = document.getElementById('active-runs');
     if (!runs || runs.length === 0) {
-        el.innerHTML = '<div class="empty" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px;">No active workflows</div>';
+        setHtmlIfChanged('active-runs', '<div class="empty" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px;">No active workflows</div>');
         return;
     }
     var html = '';
     for (var i = 0; i < runs.length; i++) {
         html += renderRunCard(runs[i], i, 'active');
     }
-    el.innerHTML = html;
+    setHtmlIfChanged('active-runs', html);
 }
 
 function renderRunCard(r, i, keyPrefix) {
@@ -1468,7 +1468,7 @@ function renderRunCard(r, i, keyPrefix) {
 function renderCompletedRuns(runs) {
     var el = document.getElementById('completed-runs');
     if (!runs || runs.length === 0) {
-        el.innerHTML = '<table><tbody><tr><td class="empty" colspan="7">No completed runs</td></tr></tbody></table>';
+        setHtmlIfChanged('completed-runs', '<table><tbody><tr><td class="empty" colspan="7">No completed runs</td></tr></tbody></table>');
         return;
     }
     var reviewedCount = 0;
@@ -1525,7 +1525,7 @@ function renderCompletedRuns(runs) {
         html += '</td></tr>';
     }
     html += '</tbody></table>';
-    el.innerHTML = html;
+    setHtmlIfChanged('completed-runs', html);
 }
 
 // ---------------------------------------------------------------------------
@@ -1534,7 +1534,7 @@ function renderCompletedRuns(runs) {
 function renderFailedRuns(runs) {
     var el = document.getElementById('failed-runs');
     if (!runs || runs.length === 0) {
-        el.innerHTML = '<table><tbody><tr><td class="empty" colspan="8">No failed runs</td></tr></tbody></table>';
+        setHtmlIfChanged('failed-runs', '<table><tbody><tr><td class="empty" colspan="8">No failed runs</td></tr></tbody></table>');
         return;
     }
     var reviewedCount = 0;
@@ -1584,7 +1584,7 @@ function renderFailedRuns(runs) {
         html += '</td></tr>';
     }
     html += '</tbody></table>';
-    el.innerHTML = html;
+    setHtmlIfChanged('failed-runs', html);
 }
 
 // ---------------------------------------------------------------------------
@@ -1785,8 +1785,16 @@ function renderMetrics() {
 }
 
 // ---------------------------------------------------------------------------
-// Render All
+// Render All — diff-based to avoid flicker
 // ---------------------------------------------------------------------------
+var _renderCache = {};
+function setHtmlIfChanged(id, html) {
+    if (_renderCache[id] === html) return;
+    _renderCache[id] = html;
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+}
+
 function renderAll() {
     if (!dashboardData) return;
     renderStats(dashboardData.stats);
@@ -1819,7 +1827,7 @@ function renderAbandonedRuns(runs) {
     for (var i = 0; i < runs.length; i++) {
         html += renderRunCard(runs[i], i, 'abandoned');
     }
-    container.innerHTML = html;
+    setHtmlIfChanged('abandoned-runs', html);
 }
 
 function toggleShowAbandoned() {
@@ -1922,7 +1930,7 @@ function toggleExpand(key) {
 // Init
 // ---------------------------------------------------------------------------
 fetchDashboard();
-setInterval(fetchDashboard, 10000);
+setInterval(fetchDashboard, 5000);
 </script>
 </body>
 </html>"""

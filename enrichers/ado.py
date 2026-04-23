@@ -68,31 +68,31 @@ def _resolve_twig_db(cwd: Path, metadata: dict) -> Path | None:
 
     result: Path | None = None
 
-    # Explicit project_url in metadata → use global twig DB for that org/project
+    # Explicit project_url in metadata → find twig DB for that org/project
     if metadata.get("project_url"):
         import re
         m = re.search(r"dev\.azure\.com/([^/]+)/([^/]+)", metadata["project_url"])
         if m:
             org, project = m.group(1), m.group(2)
-            # Check git_repo path first (the main repo where .twig/ lives)
-            git_repo = metadata.get("git_repo")
-            if git_repo:
-                repo_db = Path(git_repo) / ".twig" / org / project / "twig.db"
-                if repo_db.exists():
-                    result = repo_db
-            # Check per-repo (cwd/.twig/{org}/{project})
+            # CWD first — the worktree where the workflow runs
+            local_db = cwd / ".twig" / org / project / "twig.db"
+            if local_db.exists():
+                result = local_db
+            # Then git_repo (the main repo, for cases where CWD has no .twig)
             if result is None:
-                local_db = cwd / ".twig" / org / project / "twig.db"
-                if local_db.exists():
-                    result = local_db
-            # Check main worktree (via git)
+                git_repo = metadata.get("git_repo")
+                if git_repo:
+                    repo_db = Path(git_repo) / ".twig" / org / project / "twig.db"
+                    if repo_db.exists():
+                        result = repo_db
+            # Main worktree via git (fallback when no metadata.git_repo)
             if result is None:
                 main_tree = _find_main_worktree(cwd)
                 if main_tree and main_tree != cwd:
                     wt_db = main_tree / ".twig" / org / project / "twig.db"
                     if wt_db.exists():
                         result = wt_db
-            # Fall back to global ~/.twig/{org}/{project}
+            # Global ~/.twig/{org}/{project}
             if result is None:
                 global_db = Path.home() / ".twig" / org / project / "twig.db"
                 if global_db.exists():
