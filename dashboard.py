@@ -609,6 +609,53 @@ _port_cache: dict[str, int] | None = None
 _port_cache_time: float = 0
 _PORT_CACHE_TTL = 10  # seconds
 
+
+def _probe_conductor_port(port: int) -> tuple[str, str] | None:
+    """Probe a single port for a conductor API. Returns (run_id, wf_name) or None."""
+    import urllib.request
+    # Try /api/info first (fast, lightweight)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/info",
+            headers={"User-Agent": "conductor-dashboard-probe"},
+        )
+        with urllib.request.urlopen(req, timeout=0.3) as resp:
+            info = json.loads(resp.read().decode("utf-8", errors="replace"))
+            if isinstance(info, dict):
+                return (info.get("run_id", ""), info.get("workflow_name", ""))
+    except Exception:
+        pass
+    # Fallback: /api/state (heavier, parses event log)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/state",
+            headers={"User-Agent": "conductor-dashboard-probe"},
+        )
+        with urllib.request.urlopen(req, timeout=0.3) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            if isinstance(data, list):
+                wf_name = ""
+                depth = 0
+                terminal_at_root = False
+                for event in data:
+                    if isinstance(event, dict):
+                        etype = event.get("type", "")
+                        if etype == "workflow_started":
+                            if depth == 0:
+                                wf_name = event.get("data", {}).get("name", "")
+                            depth += 1
+                        elif etype in ("workflow_completed", "workflow_failed"):
+                            depth = max(0, depth - 1)
+                            if depth == 0:
+                                terminal_at_root = True
+                if terminal_at_root:
+                    return None
+                if wf_name:
+                    return ("", wf_name)
+    except Exception:
+        pass
+    return None
+
 
 def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[str, int]:
     """Map run_ids to their conductor dashboard ports.
@@ -651,54 +698,25 @@ def _discover_conductor_dashboard_ports(exclude_port: int = 0) -> dict[str, int]
                 continue
 
     # Slow path: probe remaining high ports not covered by PID files
+    # Use thread pool to probe in parallel (each probe has 0.3s timeout)
     candidates = [p for p in listening if p > 49000 and p != exclude_port and p not in known_ports]
-    for port in candidates:
-        try:
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/api/info",
-                headers={"User-Agent": "conductor-dashboard-probe"},
-            )
-            with urllib.request.urlopen(req, timeout=0.3) as resp:
-                info = json.loads(resp.read().decode("utf-8", errors="replace"))
-                if isinstance(info, dict):
-                    run_id = info.get("run_id", "")
-                    wf_name = info.get("workflow_name", "")
-                    if run_id:
-                        result[run_id] = port
-                    elif wf_name:
-                        result[wf_name] = port
-                    continue
-        except Exception:
-            pass
-        try:
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/api/state",
-                headers={"User-Agent": "conductor-dashboard-probe"},
-            )
-            with urllib.request.urlopen(req, timeout=0.3) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="replace"))
-                if isinstance(data, list):
-                    wf_name = ""
-                    depth = 0
-                    terminal_at_root = False
-                    for event in data:
-                        if isinstance(event, dict):
-                            etype = event.get("type", "")
-                            if etype == "workflow_started":
-                                if depth == 0:
-                                    wf_name = event.get("data", {}).get("name", "")
-                                depth += 1
-                            elif etype in ("workflow_completed", "workflow_failed"):
-                                depth = max(0, depth - 1)
-                                if depth == 0:
-                                    terminal_at_root = True
-                    if terminal_at_root:
-                        continue
-                    if wf_name:
-                        if wf_name not in result or port > result[wf_name]:
-                            result[wf_name] = port
-        except Exception:
-            pass
+    if candidates:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=min(len(candidates), 16)) as pool:
+            futures = {pool.submit(_probe_conductor_port, port): port for port in candidates}
+            for fut in as_completed(futures):
+                port = futures[fut]
+                try:
+                    probe_result = fut.result()
+                    if probe_result:
+                        run_id, wf_name = probe_result
+                        if run_id:
+                            result[run_id] = port
+                        elif wf_name:
+                            if wf_name not in result or port > result[wf_name]:
+                                result[wf_name] = port
+                except Exception:
+                    pass
     _port_cache = result
     _port_cache_time = time.time()
     return result
