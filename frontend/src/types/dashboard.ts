@@ -26,6 +26,21 @@ export interface DashboardStats {
   checkpoints: number;
 }
 
+export interface SystemMeta {
+  pid?: number;
+  platform?: string;
+  python_version?: string;
+  conductor_version?: string;
+  cwd?: string;
+  started_at?: string;
+  run_id?: string;
+  log_file?: string;
+  bg_mode?: boolean;
+  dashboard_port?: number;
+  dashboard_url?: string;
+  parent_pid?: number;
+}
+
 export interface RunData {
   log_file: string;
   name: string;
@@ -57,6 +72,7 @@ export interface RunData {
   work_item_url: string;
   run_id: string;
   metadata: Record<string, unknown>;
+  system_meta: SystemMeta;
   dashboard_port: number;
   dashboard_url: string;
   replay_cmd: string;

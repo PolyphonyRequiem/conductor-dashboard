@@ -90,6 +90,8 @@ class WorkflowRun:
     metadata: dict = field(default_factory=dict)
     # Run identity (from conductor's event log subscriber)
     run_id: str = ""
+    # System metadata from conductor's workflow_started event ($system)
+    system_meta: dict = field(default_factory=dict)
     # Liveness signals
     tool_in_flight: bool = False  # last tool event was agent_tool_start with no matching complete
     last_event_ts: float = 0.0    # timestamp of the most recent event parsed
@@ -120,6 +122,32 @@ class ActiveRun:
 # ---------------------------------------------------------------------------
 # Active-run detection (Windows-compatible)
 # ---------------------------------------------------------------------------
+def _safe_int(val: Any, default: int = 0) -> int:
+    """Coerce a value to int, returning *default* on failure."""
+    if isinstance(val, int):
+        return val
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """Return True if a process with the given PID exists (Windows)."""
+    if pid <= 0:
+        return False
+    try:
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.05) -> bool:
     """Return True if something is actually listening on *port*.
 
@@ -282,7 +310,14 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         run.started_at = ts
                         run.agent_defs = data.get("agents", [])
                         run.metadata = data.get("metadata", {})
-                        run.run_id = data.get("run_id", "")
+                        # run_id: prefer top-level, fall back to system
+                        raw_system = data.get("system", {})
+                        run.system_meta = raw_system if isinstance(raw_system, dict) else {}
+                        run.run_id = data.get("run_id", "") or run.system_meta.get("run_id", "")
+                        # Coerce numeric system fields to int for safe comparison
+                        for _k in ("pid", "dashboard_port", "parent_pid"):
+                            if _k in run.system_meta:
+                                run.system_meta[_k] = _safe_int(run.system_meta[_k])
                         for ad in run.agent_defs:
                             agent_type_map[ad.get("name", "")] = ad.get("type", "agent")
                         # Early work_item_id from metadata (injected at invocation time)
@@ -470,12 +505,17 @@ def _parse_event_log(path: Path) -> WorkflowRun:
 _parsed_log_cache: dict[str, tuple[float, int, WorkflowRun]] = {}
 
 
-def _load_event_logs(name_to_port: dict[str, int] | None = None) -> list[WorkflowRun]:
+def _load_event_logs(
+    name_to_port: dict[str, int] | None = None,
+    _listening_snapshot: set[int] | None = None,
+) -> list[WorkflowRun]:
     runs: list[WorkflowRun] = []
     if not CONDUCTOR_DIR.exists():
         return runs
     if name_to_port is None:
         name_to_port = {}
+    if _listening_snapshot is None:
+        _listening_snapshot = set()
     now = time.time()
     for p in sorted(CONDUCTOR_DIR.glob("*.events.jsonl")):
         # Use cached parse result if file hasn't changed
@@ -545,6 +585,31 @@ def _load_event_logs(name_to_port: dict[str, int] | None = None) -> list[Workflo
             and (now - run.last_event_ts) < 600
         ):
             run.status = "running"
+
+        # Fix #4: system metadata PID-based liveness (supplementary, not authoritative).
+        # If system.pid is present and alive, promote non-terminal runs to "running".
+        # PID alone is a weak signal on Windows (PID reuse), so we gate it on a
+        # time window: the run must have started within the last 24 hours.
+        system_pid = _safe_int(run.system_meta.get("pid"))
+        if (
+            system_pid
+            and run.status not in ("running", "completed", "failed")
+            and run.started_at
+            and (now - run.started_at) < 86400  # 24h window for PID trust
+            and _is_pid_alive(system_pid)
+        ):
+            run.status = "running"
+
+        # Fix #5: system metadata dashboard_port shortcut.
+        # If the event log declares a dashboard_port (from $system metadata)
+        # and that port is still listening, add it to name_to_port so
+        # _serialize_run can find it without the expensive port scan.
+        sys_port = _safe_int(run.system_meta.get("dashboard_port"))
+        if sys_port and run.run_id and run.run_id not in name_to_port:
+            if sys_port in _listening_snapshot:
+                name_to_port[run.run_id] = sys_port
+                if run.status not in ("completed", "failed"):
+                    run.status = "running"
 
         runs.append(run)
     return runs
@@ -2302,24 +2367,39 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     if not dashboard_port:
         dashboard_port = name_to_port.get(r.name)
 
-    # Port-based liveness: if we found a listening conductor dashboard for
-    # this run, the process is definitively alive.  _discover_conductor_
-    # dashboard_ports() already verified the port is LISTENING (netstat) and
-    # responding to the conductor API.  This is far more reliable than PID
-    # file matching, which breaks for foreground runs, gate-waiting runs
-    # whose mtime goes stale, and races with PID file cleanup.
+    # Liveness detection priority:
+    # 1. Dashboard port (authoritative — verified via netstat + HTTP probe)
+    # 2. System PID (supplementary — gated on 24h time window to mitigate PID reuse)
+    # 3. Log mtime heuristic (legacy fallback)
     #
-    # Fallback for non-web runs (no dashboard port): use log mtime heuristic.
+    # If system metadata provides a dashboard_port that discovery missed
+    # (e.g., port was probed before event log was parsed), try it directly.
+    if not dashboard_port:
+        sys_port = _safe_int(r.system_meta.get("dashboard_port"))
+        if sys_port and sys_port != _dashboard_port:
+            dashboard_port = sys_port
+
+    now = time.time()
     if dashboard_port:
         process_alive = True
-    elif r.log_file:
-        try:
-            mtime = Path(r.log_file).stat().st_mtime
-            process_alive = (time.time() - mtime) < 300  # 5 min
-        except OSError:
-            process_alive = False
     else:
-        process_alive = False
+        # PID check: supplement when no dashboard port, gated on time window
+        system_pid = _safe_int(r.system_meta.get("pid"))
+        if (
+            system_pid
+            and r.started_at
+            and (now - r.started_at) < 86400
+            and _is_pid_alive(system_pid)
+        ):
+            process_alive = True
+        elif r.log_file:
+            try:
+                mtime = Path(r.log_file).stat().st_mtime
+                process_alive = (now - mtime) < 300  # 5 min
+            except OSError:
+                process_alive = False
+        else:
+            process_alive = False
 
     # Check if closeout-filing skill is available for review
     wf_name = r.name or ""
@@ -2362,6 +2442,7 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
             "work_item_url": "",
             "run_id": r.run_id,
             "metadata": r.metadata,
+            "system_meta": r.system_meta,
             "dashboard_port": dashboard_port,
             "dashboard_url": f"http://localhost:{dashboard_port}" if dashboard_port else "",
             "replay_cmd": f'conductor replay "{r.log_file}" --web-bg',
@@ -2386,8 +2467,16 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
 
     cwd: Path = Path.home()
 
-    # Best: metadata.cwd injected at invocation time
-    meta_cwd = r.metadata.get("cwd")
+    # Best: system_meta.cwd from $system metadata (authoritative, set by conductor)
+    sys_cwd = r.system_meta.get("cwd")
+    if sys_cwd and isinstance(sys_cwd, str):
+        p = Path(sys_cwd.replace("/", os.sep))
+        if p.exists():
+            cwd = p
+
+    # Second: metadata.cwd injected at invocation time (user-defined)
+    if cwd == Path.home():
+        meta_cwd = r.metadata.get("cwd")
     if meta_cwd and "{" not in str(meta_cwd):
         p = Path(str(meta_cwd).replace("/", os.sep))
         if p.exists():
@@ -2459,6 +2548,7 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
         "work_item_url": ado_data.get("work_item_url", ""),
         "run_id": r.run_id,
         "metadata": r.metadata,
+        "system_meta": r.system_meta,
         "dashboard_port": dashboard_port,
         "dashboard_url": f"http://localhost:{dashboard_port}" if dashboard_port else "",
         "replay_cmd": f'conductor replay "{r.log_file}" --web-bg',
@@ -2483,8 +2573,10 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
 
 
 def _compute_dashboard(reviewed_set: set[str] | None = None) -> dict:
+    # Single netstat snapshot shared across discovery and event-log loading
+    listening = _get_listening_ports()
     name_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
-    runs = _load_event_logs(name_to_port)
+    runs = _load_event_logs(name_to_port, _listening_snapshot=listening)
     checkpoints = _load_checkpoints()
     costs = _aggregate_costs(runs)
     errors = _aggregate_errors(runs)

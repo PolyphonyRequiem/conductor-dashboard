@@ -38,6 +38,17 @@ export function RunDetailPanel({ run }: Props) {
             📁 {run.cwd.split(/[\\/]/).slice(-2).join('/')}
           </span>
         )}
+        {/* System metadata badges */}
+        {run.system_meta?.conductor_version && (
+          <span className="text-xs text-[--color-text2] opacity-60">
+            conductor v{run.system_meta.conductor_version}
+          </span>
+        )}
+        {run.system_meta?.pid && (
+          <span className="text-xs text-[--color-text2] opacity-60">
+            PID {run.system_meta.pid}
+          </span>
+        )}
       </div>
 
       {/* Embedded Workflow Graph (live runs) */}
