@@ -14,6 +14,7 @@ export function RunDetailPanel({ run }: Props) {
 
   const { events, connected } = useConductorWs({
     logFile: run.log_file,
+    dashboardPort: run.dashboard_port,
     enabled: isLive,
   });
 
@@ -40,7 +41,7 @@ export function RunDetailPanel({ run }: Props) {
       </div>
 
       {/* Embedded Workflow Graph (live runs) */}
-      {isLive && events.length > 0 && (
+      {isLive && (
         <div>
           <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-[--color-text2] mb-1.5">
             <span>Workflow Graph</span>
