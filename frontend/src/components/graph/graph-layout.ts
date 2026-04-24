@@ -22,7 +22,7 @@ const NODE_HEIGHT = 48;
 export function buildGraphElements(state: GraphState): { nodes: Node<LayoutNodeData>[]; edges: Edge[] } {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 60, marginx: 20, marginy: 20 });
+  g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 80, marginx: 20, marginy: 20 });
 
   // Add start node
   if (state.entryPoint) {

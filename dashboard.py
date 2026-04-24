@@ -2128,6 +2128,17 @@ async def api_status():
     return await loop.run_in_executor(None, _compute_status)
 
 
+@app.get("/api/open-folder", include_in_schema=False)
+async def api_open_folder(path: str):
+    """Open a folder in Windows Explorer."""
+    import subprocess
+    folder = Path(path)
+    if folder.exists() and folder.is_dir():
+        subprocess.Popen(["explorer", str(folder)])
+        return {"ok": True}
+    return {"ok": False, "error": "Folder not found"}
+
+
 def _compute_status():
     runs = _load_event_logs()
     checkpoints = _load_checkpoints()

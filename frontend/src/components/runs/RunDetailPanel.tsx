@@ -1,6 +1,6 @@
-import { ExternalLink, GitBranch, Layers } from 'lucide-react';
+import { ExternalLink, GitBranch, FolderOpen } from 'lucide-react';
 import type { RunData, TypeStateDef } from '@/types/dashboard';
-import { fmtDuration, stateBadgeClass, categoryBarColor } from '@/lib/format';
+import { stateBadgeClass, categoryBarColor } from '@/lib/format';
 import { useConductorWs } from '@/hooks/use-conductor-ws';
 import { EmbeddedWorkflowGraph } from '@/components/graph/EmbeddedWorkflowGraph';
 
@@ -10,7 +10,6 @@ interface Props {
 
 export function RunDetailPanel({ run }: Props) {
   const hierarchy = run.hierarchy;
-  const subworkflows = run.subworkflows || [];
   const isLive = run.process_alive && !!run.dashboard_port;
 
   const { events, connected } = useConductorWs({
@@ -118,30 +117,24 @@ export function RunDetailPanel({ run }: Props) {
         </div>
       )}
 
-      {/* Subworkflows */}
-      {subworkflows.length > 0 && (
-        <div>
-          <div className="text-xs uppercase tracking-wide text-[--color-text2] mb-1.5">
-            <Layers size={12} className="inline mr-1" />
-            Subworkflows ({subworkflows.length})
-          </div>
-          <div className="grid grid-cols-[auto_auto_1fr_auto] gap-x-3 gap-y-0.5 text-xs font-mono">
-            {subworkflows.map((sw, i) => (
-              <div key={i} className="contents">
-                <span>{sw.status === 'running' ? '🔄' : '✅'}</span>
-                <span className="text-[--color-accent]">{sw.workflow.replace('./', '').replace('.yaml', '')}</span>
-                <span className="text-[--color-text2] truncate">{sw.item_key ? `[${sw.item_key}]` : ''}</span>
-                <span className="text-[--color-text2] text-right tabular-nums">{sw.elapsed > 0 ? fmtDuration(sw.elapsed) : '—'}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Worktree details */}
       {run.worktree && (run.worktree.branch || run.worktree.name) && (
         <div className="flex items-center gap-3 text-xs text-[--color-text2]">
-          {run.worktree.name && (
+          {run.worktree.name && run.worktree.toplevel && (
+            <a
+              href={`/api/open-folder?path=${encodeURIComponent(run.worktree.toplevel)}`}
+              className="inline-flex items-center gap-1 text-[--color-text] hover:text-[--color-accent] transition-colors font-medium"
+              title={`Open ${run.worktree.toplevel} in Explorer`}
+              onClick={(e) => {
+                e.preventDefault();
+                fetch(`/api/open-folder?path=${encodeURIComponent(run.worktree!.toplevel!)}`);
+              }}
+            >
+              <FolderOpen size={11} />
+              📦 {run.worktree.name}
+            </a>
+          )}
+          {run.worktree.name && !run.worktree.toplevel && (
             <span className="flex items-center gap-1">
               📦 <strong className="text-[--color-text]">{run.worktree.name}</strong>
             </span>
@@ -150,11 +143,6 @@ export function RunDetailPanel({ run }: Props) {
             <span className="flex items-center gap-1">
               <GitBranch size={11} className="text-[--color-green]" />
               <span className="text-[--color-accent]">{run.worktree.branch}</span>
-            </span>
-          )}
-          {run.worktree.toplevel && (
-            <span className="truncate max-w-[200px]" title={run.worktree.toplevel}>
-              {run.worktree.toplevel}
             </span>
           )}
         </div>

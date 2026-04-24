@@ -34,7 +34,7 @@ function filterToNeighborhood(state: GraphState, focus: string): GraphState {
   };
 }
 
-export function EmbeddedWorkflowGraph({ events, height = 350, focusAgent }: Props) {
+export function EmbeddedWorkflowGraph({ events, height, focusAgent }: Props) {
   const fullState = useMemo(() => processEvents(events), [events]);
   const graphState = useMemo(
     () => (focusAgent && fullState.nodes[focusAgent] ? filterToNeighborhood(fullState, focusAgent) : fullState),
@@ -42,18 +42,21 @@ export function EmbeddedWorkflowGraph({ events, height = 350, focusAgent }: Prop
   );
   const { nodes, edges } = useMemo(() => buildGraphElements(graphState), [graphState]);
 
+  // Dynamic height: base 120px + 56px per node row, clamped to reasonable range
+  const computedHeight = height ?? Math.max(160, Math.min(500, 120 + nodes.length * 56));
+
   const onNodeClick: NodeMouseHandler = useCallback(() => {}, []);
 
   if (nodes.length === 0) {
     return (
-      <div className="flex items-center justify-center text-[--color-text2] text-xs" style={{ height }}>
+      <div className="flex items-center justify-center text-[--color-text2] text-xs" style={{ height: computedHeight }}>
         No workflow events available
       </div>
     );
   }
 
   return (
-    <div style={{ height }} className="rounded-lg border border-[--color-border] overflow-hidden">
+    <div style={{ height: computedHeight }} className="rounded-lg border border-[--color-border] overflow-hidden">
       <ReactFlow
         nodes={nodes}
         edges={edges}
