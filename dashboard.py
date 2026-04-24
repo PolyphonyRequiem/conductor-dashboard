@@ -822,6 +822,8 @@ def _run_to_raw(r: WorkflowRun) -> dict:
         "name": r.name,
         "status": r.status,
         "started_at": r.started_at,
+        "ended_at": r.ended_at,
+        "run_id": r.run_id,
         "total_cost": r.total_cost,
         "total_tokens": r.total_tokens,
         "agents": [

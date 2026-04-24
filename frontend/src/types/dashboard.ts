@@ -201,6 +201,8 @@ export interface RawRun {
   name: string;
   status: RunStatus;
   started_at: number;
+  ended_at: number | null;
+  run_id: string;
   total_cost: number;
   total_tokens: number;
   agents: AgentData[];

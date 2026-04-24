@@ -3,6 +3,7 @@ import { useDashboardStore } from '@/stores/dashboard-store';
 import { useUIStore } from '@/stores/ui-store';
 import { useSSE } from '@/hooks/use-sse';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useGateNotifications } from '@/hooks/use-gate-notifications';
 import { Header } from '@/components/layout/Header';
 import { StatsBar } from '@/components/layout/StatsBar';
 import { SearchBar } from '@/components/layout/SearchBar';
@@ -30,6 +31,7 @@ function filterRuns(runs: RunData[], filterText: string): RunData[] {
 
 export default function App() {
   useSSE();
+  useGateNotifications();
   const data = useDashboardStore((s) => s.data);
   const filterText = useUIStore((s) => s.filterText);
   const searchRef = useRef<HTMLInputElement>(null);

@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { useDashboardStore } from '@/stores/dashboard-store';
 import { useUIStore } from '@/stores/ui-store';
 import { fmtCost, fmtCost2, fmtTokens, fmtDuration, fmtPercent } from '@/lib/format';
+import { CostBurnChart } from './CostBurnChart';
+import { RunTimelineChart } from './RunTimelineChart';
 import type { RawRun, AgentMetric, WorkflowMetric, ModelMetric, TopAgent } from '@/types/dashboard';
 
 type MetricsRange = '24h' | '7d' | '30d' | 'all';
@@ -94,6 +96,10 @@ export function MetricsDashboard() {
   const setRange = useUIStore((s) => s.setMetricsRange);
 
   const metrics = useMemo(() => computeMetrics(runsRaw, range), [runsRaw, range]);
+  const filteredRuns = useMemo(() => {
+    const cutoff = rangeCutoff(range);
+    return runsRaw.filter((r) => r.started_at >= cutoff);
+  }, [runsRaw, range]);
 
   return (
     <div>
@@ -124,6 +130,10 @@ export function MetricsDashboard() {
         <span>Cost: <strong>{fmtCost2(metrics.totals.cost)}</strong></span>
         <span>Tokens: <strong>{fmtTokens(metrics.totals.tokens)}</strong></span>
       </div>
+
+      {/* Charts */}
+      <CostBurnChart runs={filteredRuns} />
+      <RunTimelineChart runs={filteredRuns} />
 
       {/* By Workflow */}
       <MetricsTable
