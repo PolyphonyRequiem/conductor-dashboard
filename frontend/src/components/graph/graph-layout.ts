@@ -22,7 +22,7 @@ const NODE_HEIGHT = 48;
 export function buildGraphElements(state: GraphState): { nodes: Node<LayoutNodeData>[]; edges: Edge[] } {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 80, marginx: 20, marginy: 20 });
+  g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 160, marginx: 20, marginy: 20 });
 
   // Add start node
   if (state.entryPoint) {
@@ -119,6 +119,7 @@ export function buildGraphElements(state: GraphState): { nodes: Node<LayoutNodeD
       source: route.from,
       target: route.to,
       animated: isTaken && state.workflowStatus === 'running',
+      zIndex: 10,
       style: {
         stroke: isFailed ? '#f85149' : isTaken ? '#3fb950' : '#30363d',
         strokeWidth: isTaken ? 2 : 1,
