@@ -21,10 +21,9 @@ export function useConductorWs({ dashboardPort, enabled = true }: UseConductorWs
 
     const fetchState = async () => {
       try {
-        const res = await fetch(`http://localhost:${dashboardPort}/api/state`);
+        const res = await fetch(`/api/run/${dashboardPort}/state`);
         if (!res.ok) return;
         const data = (await res.json()) as WorkflowEvent[];
-        // Only update if we got new events
         if (data.length !== lastLenRef.current) {
           lastLenRef.current = data.length;
           setEvents(data);

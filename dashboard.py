@@ -2139,6 +2139,18 @@ async def api_open_folder(path: str):
     return {"ok": False, "error": "Folder not found"}
 
 
+@app.get("/api/run/{port:int}/state", include_in_schema=False)
+async def api_run_state(port: int):
+    """Proxy a conductor instance's /api/state to avoid CORS issues."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"http://localhost:{port}/api/state")
+            return resp.json()
+    except Exception:
+        return []
+
+
 def _compute_status():
     runs = _load_event_logs()
     checkpoints = _load_checkpoints()
