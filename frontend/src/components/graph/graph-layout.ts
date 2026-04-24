@@ -126,6 +126,9 @@ export function buildGraphElements(state: GraphState): { nodes: Node<LayoutNodeD
       },
       label: route.condition ? route.condition : undefined,
       labelStyle: { fill: '#8b949e', fontSize: 10 },
+      labelBgStyle: { fill: '#0d1117', opacity: 0.85 },
+      labelBgPadding: [4, 2] as [number, number],
+      labelBgBorderRadius: 3,
     });
   }
 
