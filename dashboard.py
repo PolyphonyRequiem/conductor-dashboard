@@ -466,39 +466,16 @@ def _parse_event_log(path: Path) -> WorkflowRun:
     return run
 
 
-def _pid_matches_run(active: "ActiveRun", run: WorkflowRun) -> bool:
-    """Return True if the alive PID-registered ActiveRun matches this event log.
-
-    Matching uses (1) workflow yaml stem == run.name and (2) started_at within
-    a 5-second tolerance (ISO UTC → epoch conversion).
-    """
-    if not active.workflow or not run.name:
-        return False
-    try:
-        yaml_stem = Path(active.workflow).stem
-    except Exception:
-        return False
-    if yaml_stem != run.name:
-        return False
-    if not active.started_at or not run.started_at:
-        return False
-    try:
-        pid_epoch = datetime.fromisoformat(active.started_at).timestamp()
-    except (ValueError, TypeError):
-        return False
-    return abs(pid_epoch - run.started_at) < 5.0
-
-
 # Cache parsed event logs: path -> (mtime, size, WorkflowRun)
 _parsed_log_cache: dict[str, tuple[float, int, WorkflowRun]] = {}
 
 
-def _load_event_logs() -> list[WorkflowRun]:
+def _load_event_logs(name_to_port: dict[str, int] | None = None) -> list[WorkflowRun]:
     runs: list[WorkflowRun] = []
     if not CONDUCTOR_DIR.exists():
         return runs
-    # Load alive PID-registered runs once so we can cross-check liveness below.
-    active_runs = [a for a in _load_active_runs() if a.alive]
+    if name_to_port is None:
+        name_to_port = {}
     now = time.time()
     for p in sorted(CONDUCTOR_DIR.glob("*.events.jsonl")):
         # Use cached parse result if file hasn't changed
@@ -529,20 +506,25 @@ def _load_event_logs() -> list[WorkflowRun]:
         if run.metadata.get("dashboard_hidden"):
             continue
 
-        # Fix #1: if an alive PID file matches this run, force status=running
-        # regardless of mtime (backgrounded conductor runs may be silent for
-        # extended periods during long tool calls).
+        # Fix #1: if a conductor dashboard port matches this run, force
+        # status=running regardless of mtime (backgrounded conductor runs may
+        # be silent for extended periods during long tool calls or gate waits).
+        def _has_live_port(run: WorkflowRun) -> bool:
+            if run.run_id and run.run_id in name_to_port:
+                return True
+            if run.name and run.name in name_to_port:
+                return True
+            return False
+
         if run.status != "running" and run.status not in ("completed", "failed"):
-            if any(_pid_matches_run(a, run) for a in active_runs):
+            if _has_live_port(run):
                 run.status = "running"
 
-        # Fix #2: gate-waiting runs with a live process should stay running.
-        # But don't force-override for dead processes — those go to Abandoned
-        # with the "GATE ABANDONED" badge via process_alive check.
+        # Fix #2: gate-waiting runs with a live dashboard port should stay running.
         if (
             run.status not in ("running", "completed", "failed")
             and run.gate_waiting
-            and any(_pid_matches_run(a, run) for a in active_runs)
+            and _has_live_port(run)
         ):
             run.status = "running"
 
@@ -2152,9 +2134,9 @@ async def api_run_state(port: int):
 
 
 def _compute_status():
-    runs = _load_event_logs()
+    name_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
+    runs = _load_event_logs(name_to_port)
     checkpoints = _load_checkpoints()
-    active = _load_active_runs()
     costs = _aggregate_costs(runs)
     errors = _aggregate_errors(runs)
     gates = sum(1 for r in runs if r.gate_waiting and r.status == "running")
@@ -2291,14 +2273,8 @@ async def ws_proxy(websocket: WebSocket, log_file: str):
 
 
 def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
-                   alive_pid_runs: list["ActiveRun"] | None = None,
-                   skip_enrichment: bool = False,
-                   all_pid_runs: list["ActiveRun"] | None = None) -> dict:
+                   skip_enrichment: bool = False) -> dict:
     """Convert a WorkflowRun to a JSON-serializable dict."""
-    if alive_pid_runs is None:
-        alive_pid_runs = []
-    if all_pid_runs is None:
-        all_pid_runs = []
     # Find matching dashboard port — prefer exact run_id match, fall back to name
     dashboard_port = None
     if r.run_id:
@@ -2306,30 +2282,24 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     if not dashboard_port:
         dashboard_port = name_to_port.get(r.name)
 
-    # Determine whether the backing conductor process is actually alive.
-    # PID match is the strongest signal. mtime is the fallback ONLY for
-    # foreground runs that never registered a PID file.
-    process_alive = any(
-        _pid_matches_run(a, r) for a in alive_pid_runs
-    )
-    if not process_alive and r.log_file:
-        # If a dead PID file matches this run, the process genuinely
-        # terminated — don't let the mtime fallback resurrect it.
-        has_dead_pid = any(
-            _pid_matches_run(a, r)
-            for a in all_pid_runs if not a.alive
-        )
-        if not has_dead_pid:
-            try:
-                mtime = Path(r.log_file).stat().st_mtime
-                if (time.time() - mtime) < 300:  # 5 min
-                    process_alive = True
-                elif dashboard_port:
-                    # mtime is stale — this port likely belongs to a different run
-                    # with the same workflow name. Don't link it.
-                    dashboard_port = None
-            except OSError:
-                pass
+    # Port-based liveness: if we found a listening conductor dashboard for
+    # this run, the process is definitively alive.  _discover_conductor_
+    # dashboard_ports() already verified the port is LISTENING (netstat) and
+    # responding to the conductor API.  This is far more reliable than PID
+    # file matching, which breaks for foreground runs, gate-waiting runs
+    # whose mtime goes stale, and races with PID file cleanup.
+    #
+    # Fallback for non-web runs (no dashboard port): use log mtime heuristic.
+    if dashboard_port:
+        process_alive = True
+    elif r.log_file:
+        try:
+            mtime = Path(r.log_file).stat().st_mtime
+            process_alive = (time.time() - mtime) < 300  # 5 min
+        except OSError:
+            process_alive = False
+    else:
+        process_alive = False
 
     # Check if closeout-filing skill is available for review
     wf_name = r.name or ""
@@ -2493,14 +2463,12 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
 
 
 def _compute_dashboard(reviewed_set: set[str] | None = None) -> dict:
-    runs = _load_event_logs()
+    name_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
+    runs = _load_event_logs(name_to_port)
     checkpoints = _load_checkpoints()
     costs = _aggregate_costs(runs)
     errors = _aggregate_errors(runs)
     metrics = _aggregate_metrics(runs)
-    name_to_port = _discover_conductor_dashboard_ports(exclude_port=_dashboard_port)
-    all_pid_runs = _load_active_runs()
-    alive_pid_runs = [a for a in all_pid_runs if a.alive]
 
     # Enricher caches use TTLs — no need to clear between refreshes.
     # Git worktree cache: 60s TTL. ADO DB path cache: persistent (path→DB is stable).
@@ -2520,7 +2488,7 @@ def _compute_dashboard(reviewed_set: set[str] | None = None) -> dict:
         elif r.status not in ("running", "completed", "failed"):
             # interrupted/invalid — skip enrichment
             skip = True
-        all_serialized.append(_serialize_run(r, name_to_port, alive_pid_runs, skip_enrichment=skip, all_pid_runs=all_pid_runs))
+        all_serialized.append(_serialize_run(r, name_to_port, skip_enrichment=skip))
 
     all_running = [sr for sr in all_serialized if sr["status"] == "running"]
     active_runs = [sr for sr in all_running if sr["process_alive"]]
