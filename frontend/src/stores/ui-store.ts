@@ -15,13 +15,20 @@ interface UIState {
   showAbandoned: boolean;
   /** Metrics time range filter */
   metricsRange: MetricsRange;
+  /** Search/filter text for runs */
+  filterText: string;
+  /** Whether keyboard help overlay is visible */
+  showHelp: boolean;
   /** Actions */
   toggleExpand: (key: string) => void;
+  collapseAll: () => void;
   toggleReviewed: (logFile: string) => void;
   setShowReviewedCompleted: (show: boolean) => void;
   setShowReviewedFailed: (show: boolean) => void;
   setShowAbandoned: (show: boolean) => void;
   setMetricsRange: (range: MetricsRange) => void;
+  setFilterText: (text: string) => void;
+  toggleHelp: () => void;
 }
 
 function loadSet(key: string): Set<string> {
@@ -49,12 +56,16 @@ export const useUIStore = create<UIState>((set) => ({
   showReviewedFailed: false,
   showAbandoned: loadBool('conductor-show-abandoned', false),
   metricsRange: (localStorage.getItem('conductor-metrics-range') as MetricsRange) || '24h',
+  filterText: '',
+  showHelp: false,
 
   toggleExpand: (key) => set((state) => {
     const next = new Set(state.expandedRuns);
     if (next.has(key)) next.delete(key); else next.add(key);
     return { expandedRuns: next };
   }),
+
+  collapseAll: () => set({ expandedRuns: new Set() }),
 
   toggleReviewed: (logFile) => set((state) => {
     const next = new Set(state.reviewedRuns);
@@ -75,4 +86,7 @@ export const useUIStore = create<UIState>((set) => ({
     localStorage.setItem('conductor-metrics-range', range);
     set({ metricsRange: range });
   },
+
+  setFilterText: (text) => set({ filterText: text }),
+  toggleHelp: () => set((state) => ({ showHelp: !state.showHelp })),
 }));
