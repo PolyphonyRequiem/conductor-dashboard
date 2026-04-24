@@ -120,24 +120,21 @@ export function RunDetailPanel({ run }: Props) {
       {/* Worktree details */}
       {run.worktree && (run.worktree.branch || run.worktree.name) && (
         <div className="flex items-center gap-3 text-xs text-[--color-text2]">
-          {run.worktree.name && run.worktree.toplevel && (
+          {run.worktree.name && (
             <a
-              href={`/api/open-folder?path=${encodeURIComponent(run.worktree.toplevel)}`}
-              className="inline-flex items-center gap-1 text-[--color-text] hover:text-[--color-accent] transition-colors font-medium"
-              title={`Open ${run.worktree.toplevel} in Explorer`}
+              href="#"
+              className="inline-flex items-center gap-1 text-[--color-text] hover:text-[--color-accent] underline decoration-dotted underline-offset-2 cursor-pointer transition-colors font-medium"
+              title={`Open ${run.worktree.toplevel || run.cwd || run.worktree.name} in Explorer`}
               onClick={(e) => {
                 e.preventDefault();
-                fetch(`/api/open-folder?path=${encodeURIComponent(run.worktree!.toplevel!)}`);
+                e.stopPropagation();
+                const folder = run.worktree?.toplevel || run.cwd;
+                if (folder) fetch(`/api/open-folder?path=${encodeURIComponent(folder)}`);
               }}
             >
               <FolderOpen size={11} />
               📦 {run.worktree.name}
             </a>
-          )}
-          {run.worktree.name && !run.worktree.toplevel && (
-            <span className="flex items-center gap-1">
-              📦 <strong className="text-[--color-text]">{run.worktree.name}</strong>
-            </span>
           )}
           {run.worktree.branch && (
             <span className="flex items-center gap-1">

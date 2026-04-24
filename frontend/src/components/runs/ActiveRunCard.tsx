@@ -74,6 +74,14 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     }
   }
 
+  if (run.worktree?.name) {
+    badges.push(
+      <span key="wt" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-orange-900/30 border border-orange-700/40 text-orange-300 truncate max-w-[200px]">
+        📦 <span className="truncate">{run.worktree.name}</span>
+      </span>,
+    );
+  }
+
   if (run.worktree?.branch) {
     badges.push(
       <span key="br" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-900/30 border border-green-700/40 text-green-300 truncate max-w-[300px]">
