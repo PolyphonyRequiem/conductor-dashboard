@@ -12,17 +12,20 @@ interface Segment {
   type: 'workflow' | 'agent';
   isActive: boolean;
   agentType?: RunData['current_agent_type'];
+  href?: string;
 }
 
 export function PowerlineBreadcrumbs({ run }: Props) {
   const runningSubs = (run.subworkflows || []).filter((s) => s.status === 'running');
   const segments: Segment[] = [];
+  const dashUrl = run.dashboard_url || '';
 
   // Workflow segments
   segments.push({
     name: run.name,
     type: 'workflow',
     isActive: runningSubs.length === 0,
+    href: dashUrl || undefined,
   });
 
   for (let i = 0; i < runningSubs.length; i++) {
@@ -32,12 +35,16 @@ export function PowerlineBreadcrumbs({ run }: Props) {
       name: swName,
       type: 'workflow',
       isActive: i === runningSubs.length - 1,
+      href: dashUrl ? `${dashUrl}?subworkflow=${encodeURIComponent(swName)}` : undefined,
     });
   }
 
   // Active agent as final segment
   const activeAgent = run.current_agent || '';
   const activeAgentType = run.current_agent_type || 'agent';
+  const agentHref = dashUrl && activeAgent
+    ? `${dashUrl}?agent=${encodeURIComponent(activeAgent)}`
+    : undefined;
 
   const total = segments.length + (activeAgent ? 1 : 0);
 
@@ -91,26 +98,50 @@ export function PowerlineBreadcrumbs({ run }: Props) {
       <div className="flex items-stretch shrink-0">
         {segments.map((seg, i) => {
           const isLast = !activeAgent && i === segments.length - 1;
-          return (
-            <div
+          const cls = segmentClasses(seg.isActive, false, i === 0, isLast, total);
+          const sty = seg.isActive ? { animation: 'pl-active-pulse 2.5s ease-in-out infinite' } as const : undefined;
+          const inner = (<><Layers size={14} className="shrink-0" /><span>{seg.name}</span></>);
+          return seg.href ? (
+            <a
               key={i}
-              className={segmentClasses(seg.isActive, false, i === 0, isLast, total)}
-              style={seg.isActive ? { animation: 'pl-active-pulse 2.5s ease-in-out infinite' } : undefined}
+              href={seg.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${cls} hover:brightness-125 transition-all`}
+              style={sty}
+              title={`Open Conductor UI${seg.isActive ? '' : ` — ${seg.name}`}`}
+              onClick={(e) => e.stopPropagation()}
             >
-              <Layers size={14} className="shrink-0" />
-              <span>{seg.name}</span>
-            </div>
+              {inner}
+            </a>
+          ) : (
+            <div key={i} className={cls} style={sty}>{inner}</div>
           );
         })}
-        {activeAgent && (
-          <div
-            className={segmentClasses(false, true, false, true, total)}
-            style={{ animation: 'pl-agent-pulse 2.5s ease-in-out infinite' }}
-          >
-            <AgentTypeIcon type={activeAgentType} size={14} className="shrink-0" />
-            <span>{activeAgent}</span>
-          </div>
-        )}
+        {activeAgent && (() => {
+          const cls = segmentClasses(false, true, false, true, total);
+          const inner = (<><AgentTypeIcon type={activeAgentType} size={14} className="shrink-0" /><span>{activeAgent}</span></>);
+          return agentHref ? (
+            <a
+              href={agentHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${cls} hover:brightness-125 transition-all`}
+              style={{ animation: 'pl-agent-pulse 2.5s ease-in-out infinite' }}
+              title={`Open Conductor UI — ${activeAgent}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {inner}
+            </a>
+          ) : (
+            <div
+              className={cls}
+              style={{ animation: 'pl-agent-pulse 2.5s ease-in-out infinite' }}
+            >
+              {inner}
+            </div>
+          );
+        })()}
       </div>
       {titleElement}
       {visibleTags.length > 0 && (

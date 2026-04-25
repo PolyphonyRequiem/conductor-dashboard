@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, GitBranch, DollarSign, Zap } from 'lucide-react';
+import { ChevronRight, GitBranch, DollarSign, Zap } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
@@ -177,19 +177,6 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
             <DurationTicker startedAt={run.started_at} className="text-[--color-text2] text-sm tabular-nums" />
           )}
           {statusLabel}
-          {run.dashboard_url && (
-            <a
-              href={run.dashboard_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-[--color-accent] text-white hover:brightness-110 transition-all"
-              title={`Open Conductor UI :${run.dashboard_port}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              UI
-              <ExternalLink size={9} />
-            </a>
-          )}
           <span onClick={(e) => e.stopPropagation()}>
             <ConfirmButton
               label={isAbandoned ? 'Dismiss' : 'Stop'}
