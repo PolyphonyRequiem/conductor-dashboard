@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, GitBranch, Hash, DollarSign, Zap } from 'lucide-react';
+import { ChevronRight, ExternalLink, GitBranch, DollarSign, Zap } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
@@ -47,33 +47,6 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
 
   // Enrichment badges for Row 2
   const badges: React.ReactNode[] = [];
-
-  if (run.work_item_id) {
-    const wiLabel = `${run.work_item_type ? `${run.work_item_type} ` : ''}#${run.work_item_id}${run.work_item_title ? ` ${run.work_item_title}` : ''}`;
-    if (run.work_item_url) {
-      badges.push(
-        <a
-          key="wi"
-          href={run.work_item_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-900/30 border border-blue-700/40 text-blue-300 hover:bg-blue-900/50 transition-colors truncate max-w-[340px]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Hash size={10} className="shrink-0" />
-          <span className="truncate">{wiLabel}</span>
-          <ExternalLink size={9} className="shrink-0 opacity-60" />
-        </a>,
-      );
-    } else {
-      badges.push(
-        <span key="wi" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-900/30 border border-blue-700/40 text-blue-300 truncate max-w-[340px]">
-          <Hash size={10} className="shrink-0" />
-          <span className="truncate">{wiLabel}</span>
-        </span>,
-      );
-    }
-  }
 
   if (run.worktree?.name) {
     badges.push(

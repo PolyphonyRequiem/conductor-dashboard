@@ -1,5 +1,6 @@
-import { Layers, Tag } from 'lucide-react';
+import { Layers, Tag, ExternalLink } from 'lucide-react';
 import { AgentTypeIcon } from '@/components/shared/AgentTypeIcon';
+import { WorkItemIcon } from '@/components/shared/WorkItemIcon';
 import type { RunData } from '@/types/dashboard';
 
 interface Props {
@@ -39,11 +40,51 @@ export function PowerlineBreadcrumbs({ run }: Props) {
   const activeAgentType = run.current_agent_type || 'agent';
 
   const total = segments.length + (activeAgent ? 1 : 0);
+
+  // Title provider: work item badge with type color/icon
+  const wiType = run.work_item_type || '';
+  const typeColor = run.hierarchy?.type_colors?.[wiType];
+  const hexColor = typeColor ? `#${typeColor}` : '#58a6ff';
+  const iconId = run.hierarchy?.type_icons?.[wiType] ?? (wiType ? 'icon_clipboard' : '');
+  const wiId = run.work_item_id || '';
   const displayTitle = run.display_title || '';
+  const wiUrl = run.work_item_url || '';
+
+  // Tags
   const allTags = run.display_tags || [];
   const maxTags = 3;
   const visibleTags = allTags.slice(0, maxTags);
   const overflowCount = allTags.length - maxTags;
+
+  const titleContent = wiId ? (
+    <span
+      className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border truncate max-w-[400px]"
+      style={{
+        borderColor: `${hexColor}40`,
+        backgroundColor: `${hexColor}15`,
+        color: hexColor,
+      }}
+    >
+      {iconId && <WorkItemIcon iconId={iconId} color={hexColor} size={12} />}
+      <span className="font-medium shrink-0">#{wiId}</span>
+      {displayTitle && displayTitle !== `#${wiId}` && (
+        <span className="truncate opacity-80">{displayTitle}</span>
+      )}
+      {wiUrl && <ExternalLink size={9} className="shrink-0 opacity-50" />}
+    </span>
+  ) : null;
+
+  const titleElement = wiUrl && titleContent ? (
+    <a
+      href={wiUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="hover:brightness-125 transition-all"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {titleContent}
+    </a>
+  ) : titleContent;
 
   return (
     <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -71,14 +112,7 @@ export function PowerlineBreadcrumbs({ run }: Props) {
           </div>
         )}
       </div>
-      {displayTitle && (
-        <span
-          className="text-xs text-[--color-text2] truncate min-w-0"
-          title={displayTitle}
-        >
-          — {displayTitle}
-        </span>
-      )}
+      {titleElement}
       {visibleTags.length > 0 && (
         <span className="flex items-center gap-1 shrink-0">
           {visibleTags.map((tag) => (
