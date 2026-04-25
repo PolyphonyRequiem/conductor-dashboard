@@ -528,8 +528,9 @@ class TestSerializeRun:
             work_item_title="Fix login bug",
         )
         result = _serialize_run(run, {})
-        assert result["title_provider"] == "work_item"
+        assert result["title_provider"] == "ado-work-item"
         assert result["display_title"] == "Fix login bug"
+        assert result["display_tags"] == []
 
     def test_title_provider_work_item_no_title(self):
         run = WorkflowRun(
@@ -540,7 +541,7 @@ class TestSerializeRun:
             work_item_id="99",
         )
         result = _serialize_run(run, {})
-        assert result["title_provider"] == "work_item"
+        assert result["title_provider"] == "ado-work-item"
         assert result["display_title"] == "#99"
 
     def test_title_provider_empty_when_no_work_item(self):
@@ -553,30 +554,42 @@ class TestSerializeRun:
         result = _serialize_run(run, {})
         assert result["title_provider"] == ""
         assert result["display_title"] == ""
+        assert result["display_tags"] == []
 
 
 class TestComputeTitleProvider:
     """Tests for _compute_title_provider helper."""
 
     def test_work_item_with_title(self):
-        tp, dt = _compute_title_provider("123", "My Epic")
-        assert tp == "work_item"
+        tp, dt, tags = _compute_title_provider("123", "My Epic")
+        assert tp == "ado-work-item"
         assert dt == "My Epic"
+        assert tags == []
 
     def test_work_item_without_title(self):
-        tp, dt = _compute_title_provider("456", "")
-        assert tp == "work_item"
+        tp, dt, tags = _compute_title_provider("456", "")
+        assert tp == "ado-work-item"
         assert dt == "#456"
 
     def test_no_work_item(self):
-        tp, dt = _compute_title_provider("", "")
+        tp, dt, tags = _compute_title_provider("", "")
+        assert tp == ""
+        assert dt == ""
+        assert tags == []
+
+    def test_no_work_item_but_has_title(self):
+        tp, dt, tags = _compute_title_provider("", "Some title")
         assert tp == ""
         assert dt == ""
 
-    def test_no_work_item_but_has_title(self):
-        tp, dt = _compute_title_provider("", "Some title")
-        assert tp == ""
-        assert dt == ""
+    def test_tags_passed_through(self):
+        tp, dt, tags = _compute_title_provider("789", "Epic", ["twig", "PG-2"])
+        assert tp == "ado-work-item"
+        assert tags == ["twig", "PG-2"]
+
+    def test_tags_empty_when_no_work_item(self):
+        tp, dt, tags = _compute_title_provider("", "", ["ignored"])
+        assert tags == []
 
 
 # ===========================================================================

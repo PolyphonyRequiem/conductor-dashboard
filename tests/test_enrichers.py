@@ -98,14 +98,14 @@ class TestAdoEnricher:
         conn.execute("""
             CREATE TABLE work_items (
                 id INTEGER PRIMARY KEY, type TEXT, title TEXT,
-                state TEXT, parent_id INTEGER
+                state TEXT, parent_id INTEGER, fields_json TEXT
             )
         """)
-        conn.execute("INSERT INTO work_items VALUES (100, 'Epic', 'Test Epic', 'Doing', NULL)")
-        conn.execute("INSERT INTO work_items VALUES (101, 'Issue', 'Issue 1', 'Done', 100)")
-        conn.execute("INSERT INTO work_items VALUES (102, 'Issue', 'Issue 2', 'To Do', 100)")
-        conn.execute("INSERT INTO work_items VALUES (103, 'Task', 'Task 1', 'Done', 101)")
-        conn.execute("INSERT INTO work_items VALUES (104, 'Task', 'Task 2', 'Doing', 101)")
+        conn.execute("INSERT INTO work_items VALUES (100, 'Epic', 'Test Epic', 'Doing', NULL, '{\"System.Tags\": \"twig; PG-2\"}')")
+        conn.execute("INSERT INTO work_items VALUES (101, 'Issue', 'Issue 1', 'Done', 100, NULL)")
+        conn.execute("INSERT INTO work_items VALUES (102, 'Issue', 'Issue 2', 'To Do', 100, NULL)")
+        conn.execute("INSERT INTO work_items VALUES (103, 'Task', 'Task 1', 'Done', 101, NULL)")
+        conn.execute("INSERT INTO work_items VALUES (104, 'Task', 'Task 2', 'Doing', 101, NULL)")
         conn.commit()
         conn.close()
 
@@ -129,6 +129,9 @@ class TestAdoEnricher:
         assert "type_defs" in result
         assert "type_colors" in result
 
+        # Tags from fields_json
+        assert result["tags"] == ["twig", "PG-2"]
+
     def test_hierarchy_missing_item_returns_none(self, tmp_path: Path):
         _hierarchy_cache.clear()
         db_path = tmp_path / "test.db"
@@ -136,7 +139,7 @@ class TestAdoEnricher:
         conn.execute("""
             CREATE TABLE work_items (
                 id INTEGER PRIMARY KEY, type TEXT, title TEXT,
-                state TEXT, parent_id INTEGER
+                state TEXT, parent_id INTEGER, fields_json TEXT
             )
         """)
         conn.commit()

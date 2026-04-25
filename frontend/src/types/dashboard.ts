@@ -72,6 +72,7 @@ export interface RunData {
   work_item_url: string;
   title_provider: string;
   display_title: string;
+  display_tags: string[];
   run_id: string;
   metadata: Record<string, unknown>;
   system_meta: SystemMeta;
@@ -123,6 +124,8 @@ export interface HierarchyData {
   type_colors?: Record<string, string>;
   /** ADO icon_id per work item type name (e.g. Epic→"icon_crown") */
   type_icons?: Record<string, string>;
+  /** Work item tags from ADO */
+  tags?: string[];
 }
 
 export interface HierarchyFocus {

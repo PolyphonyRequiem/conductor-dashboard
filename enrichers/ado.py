@@ -202,7 +202,7 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
         cur = conn.cursor()
 
         row = cur.execute(
-            "SELECT id, type, title, state FROM work_items WHERE id = ?", (wid,)
+            "SELECT id, type, title, state, fields_json FROM work_items WHERE id = ?", (wid,)
         ).fetchone()
         if not row:
             conn.close()
@@ -210,6 +210,17 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
             return None
 
         focus = {"id": row[0], "type": row[1], "title": row[2], "state": row[3]}
+
+        # Extract tags from fields_json (semicolon-separated)
+        tags: list[str] = []
+        if row[4]:
+            try:
+                fields = json.loads(row[4])
+                raw_tags = fields.get("System.Tags", "")
+                if raw_tags:
+                    tags = [t.strip() for t in raw_tags.split(";") if t.strip()]
+            except (json.JSONDecodeError, ValueError):
+                pass
 
         # Walk UP to build ancestor chain (e.g., Task → Issue → Epic)
         ancestors = []
@@ -296,6 +307,7 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
             "type_defs": type_defs,     # State definitions per type
             "type_colors": type_colors,  # Hex color per type name
             "type_icons": type_icons,    # icon_id per type name
+            "tags": tags,               # Work item tags from fields_json
         }
     except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError):
         result = None
@@ -333,9 +345,14 @@ def enrich(run: Any, metadata: dict, ctx: Any) -> dict:
         hierarchy = _load_hierarchy(wid, db_path)
         if hierarchy:
             result["hierarchy"] = hierarchy
+            # Use focus title from the DB if we don't have one yet
+            if not run.work_item_title and hierarchy.get("focus", {}).get("title"):
+                result["twig_title"] = hierarchy["focus"]["title"]
+                result["twig_type"] = hierarchy["focus"].get("type", "")
+                result["twig_state"] = hierarchy["focus"].get("state", "")
 
-    # If we have a work_item_id but no title yet, try twig CLI
-    if not run.work_item_title:
+    # If we still have no title, try twig CLI as last resort
+    if not run.work_item_title and "twig_title" not in result:
         twig_info = _twig_show(wid, ctx.cwd)
         if twig_info:
             result["twig_title"] = twig_info.get("title", "")

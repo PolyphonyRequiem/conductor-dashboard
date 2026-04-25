@@ -1,4 +1,4 @@
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Tag } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { RunDetailPanel } from './RunDetailPanel';
 import { ActionButton } from '@/components/shared/ActionButton';
@@ -94,9 +94,27 @@ function RunRow({
         </td>
         <td className="px-3 py-2 font-semibold text-[--color-accent]">
           {run.name}
-          {run.display_title && (
-            <div className="text-xs font-normal text-[--color-text2] truncate max-w-[300px]" title={run.display_title}>
-              {run.display_title}
+          {(run.display_title || (run.display_tags && run.display_tags.length > 0)) && (
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {run.display_title && (
+                <span className="text-xs font-normal text-[--color-text2] truncate max-w-[240px]" title={run.display_title}>
+                  {run.display_title}
+                </span>
+              )}
+              {run.display_tags && run.display_tags.length > 0 && (
+                <>
+                  {run.display_tags.slice(0, 3).map((tag) => (
+                    <span key={tag} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-purple-900/30 border border-purple-700/30 text-purple-300">
+                      <Tag size={7} className="shrink-0 opacity-60" />{tag}
+                    </span>
+                  ))}
+                  {run.display_tags.length > 3 && (
+                    <span className="text-[10px] px-1 py-0 rounded-full bg-purple-900/20 border border-purple-700/20 text-purple-400 tabular-nums" title={run.display_tags.slice(3).join(', ')}>
+                      +{run.display_tags.length - 3}
+                    </span>
+                  )}
+                </>
+              )}
             </div>
           )}
         </td>

@@ -1,4 +1,4 @@
-import { Layers } from 'lucide-react';
+import { Layers, Tag } from 'lucide-react';
 import { AgentTypeIcon } from '@/components/shared/AgentTypeIcon';
 import type { RunData } from '@/types/dashboard';
 
@@ -40,6 +40,10 @@ export function PowerlineBreadcrumbs({ run }: Props) {
 
   const total = segments.length + (activeAgent ? 1 : 0);
   const displayTitle = run.display_title || '';
+  const allTags = run.display_tags || [];
+  const maxTags = 3;
+  const visibleTags = allTags.slice(0, maxTags);
+  const overflowCount = allTags.length - maxTags;
 
   return (
     <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -73,6 +77,27 @@ export function PowerlineBreadcrumbs({ run }: Props) {
           title={displayTitle}
         >
           — {displayTitle}
+        </span>
+      )}
+      {visibleTags.length > 0 && (
+        <span className="flex items-center gap-1 shrink-0">
+          {visibleTags.map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/30 border border-purple-700/30 text-purple-300"
+            >
+              <Tag size={8} className="shrink-0 opacity-60" />
+              {tag}
+            </span>
+          ))}
+          {overflowCount > 0 && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/20 border border-purple-700/20 text-purple-400 tabular-nums"
+              title={allTags.slice(maxTags).join(', ')}
+            >
+              +{overflowCount}
+            </span>
+          )}
         </span>
       )}
     </div>
