@@ -119,6 +119,8 @@ export interface HierarchyData {
   type_defs?: Record<string, TypeStateDef[]>;
   /** Hex color per work item type name (e.g. Epic→"E06C00") */
   type_colors?: Record<string, string>;
+  /** ADO icon_id per work item type name (e.g. Epic→"icon_crown") */
+  type_icons?: Record<string, string>;
 }
 
 export interface HierarchyFocus {

@@ -2477,10 +2477,10 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     # Second: metadata.cwd injected at invocation time (user-defined)
     if cwd == Path.home():
         meta_cwd = r.metadata.get("cwd")
-    if meta_cwd and "{" not in str(meta_cwd):
-        p = Path(str(meta_cwd).replace("/", os.sep))
-        if p.exists():
-            cwd = p
+        if meta_cwd and "{" not in str(meta_cwd):
+            p = Path(str(meta_cwd).replace("/", os.sep))
+            if p.exists():
+                cwd = p
 
     # Fallback: worktree_name pattern from metadata
     if cwd == Path.home():

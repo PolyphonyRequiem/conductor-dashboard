@@ -3,6 +3,7 @@ import { useUIStore } from '@/stores/ui-store';
 import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
 import { DurationTicker } from '@/components/shared/DurationTicker';
+import { WorkItemIcon } from '@/components/shared/WorkItemIcon';
 import { fmtCost2, fmtTokens } from '@/lib/format';
 import type { RunData } from '@/types/dashboard';
 
@@ -92,10 +93,10 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
   }
 
   if (run.hierarchy?.levels && run.hierarchy.levels.length > 0) {
-    const lv = run.hierarchy.levels[run.hierarchy.levels.length - 1]!;
-    const total = lv.total || 1;
-    if (total > 1) {
-      // Use type_defs to determine completed count and bar colors
+    for (const lv of run.hierarchy.levels) {
+      const total = lv.total || 0;
+      if (total === 0) continue;
+
       const typeDefs = run.hierarchy.type_defs?.[lv.type] ?? [];
       const completedStates = typeDefs
         .filter((d) => d.category === 'Completed')
@@ -114,13 +115,35 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
             .filter(([name]) => ['doing', 'started', 'active', 'committed', 'in progress'].includes(name.toLowerCase()))
             .reduce((sum, [, cnt]) => sum + cnt, 0);
 
+      const typeColor = run.hierarchy.type_colors?.[lv.type];
+      const hexColor = typeColor ? `#${typeColor}` : '#888';
+      const iconId = run.hierarchy.type_icons?.[lv.type] ?? 'icon_clipboard';
+
       badges.push(
-        <span key="prog" className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-[--color-surface] border border-[--color-border] text-[--color-text2]">
-          <span className="flex gap-px h-1.5 w-12 rounded overflow-hidden bg-[--color-border]">
-            {completedCount > 0 && <span style={{ width: `${Math.round((completedCount / total) * 100)}%`, backgroundColor: '#3fb950' }} />}
-            {inProgressCount > 0 && <span style={{ width: `${Math.round((inProgressCount / total) * 100)}%`, backgroundColor: '#58a6ff' }} />}
-          </span>
-          {completedCount}/{total}
+        <span
+          key={`lvl-${lv.type}`}
+          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-[--color-text2]"
+          style={{
+            borderColor: `${hexColor}40`,
+            backgroundColor: `${hexColor}15`,
+          }}
+          title={`${lv.type}: ${completedCount} done, ${inProgressCount} in progress, ${total} total`}
+        >
+          <WorkItemIcon iconId={iconId} color={hexColor} size={12} />
+          {total > 1 && (
+            <>
+              <span className="flex gap-px h-1.5 w-8 rounded overflow-hidden bg-[--color-border]">
+                {completedCount > 0 && (
+                  <span style={{ width: `${Math.round((completedCount / total) * 100)}%`, backgroundColor: '#3fb950' }} />
+                )}
+                {inProgressCount > 0 && (
+                  <span style={{ width: `${Math.round((inProgressCount / total) * 100)}%`, backgroundColor: '#58a6ff' }} />
+                )}
+              </span>
+              <span className="tabular-nums">{completedCount}/{total}</span>
+            </>
+          )}
+          {total === 1 && <span className="tabular-nums">1</span>}
         </span>,
       );
     }

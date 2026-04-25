@@ -3,6 +3,7 @@ import type { RunData, TypeStateDef } from '@/types/dashboard';
 import { stateBadgeClass, categoryBarColor } from '@/lib/format';
 import { useConductorWs } from '@/hooks/use-conductor-ws';
 import { EmbeddedWorkflowGraph } from '@/components/graph/EmbeddedWorkflowGraph';
+import { WorkItemIcon } from '@/components/shared/WorkItemIcon';
 
 interface Props {
   run: RunData;
@@ -72,11 +73,10 @@ export function RunDetailPanel({ run }: Props) {
             const focusStateDef = focusDefs?.find((d) => d.name === hierarchy.focus.state);
             const focusCategory = focusStateDef?.category;
             const typeColor = hierarchy.type_colors?.[hierarchy.focus.type];
+            const iconId = hierarchy.type_icons?.[hierarchy.focus.type] ?? 'icon_clipboard';
             return (
               <div className="flex items-center gap-2 text-xs mb-2">
-                {typeColor && (
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: `#${typeColor}` }} />
-                )}
+                <WorkItemIcon iconId={iconId} color={typeColor ? `#${typeColor}` : '#888'} size={14} />
                 <span className="font-medium text-[--color-text]">{hierarchy.focus.type} #{hierarchy.focus.id}</span>
                 <span className="truncate">{hierarchy.focus.title}</span>
                 <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${stateBadgeClass(hierarchy.focus.state, focusCategory)}`}>
@@ -89,18 +89,17 @@ export function RunDetailPanel({ run }: Props) {
           {hierarchy.levels.map((level, i) => {
             const total = level.total || 1;
             const typeDefs = hierarchy.type_defs?.[level.type] ?? [];
-            // Build ordered state segments from type_defs (so order matches the process template)
             const segments = buildStateSegments(level.states, typeDefs, total);
-            // Summary: count completed vs total
             const completedCount = typeDefs
               .filter((d) => d.category === 'Completed')
               .reduce((sum, d) => sum + (level.states[d.name] ?? 0), 0);
             const typeColor = hierarchy.type_colors?.[level.type];
+            const iconId = hierarchy.type_icons?.[level.type] ?? 'icon_clipboard';
 
             return (
               <div key={i} className="flex items-center gap-2 text-xs mb-1.5">
-                <span className="text-[--color-text2] min-w-[55px] flex items-center gap-1">
-                  {typeColor && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: `#${typeColor}` }} />}
+                <span className="text-[--color-text2] min-w-[70px] flex items-center gap-1">
+                  <WorkItemIcon iconId={iconId} color={typeColor ? `#${typeColor}` : '#888'} size={12} />
                   {level.type}
                 </span>
                 <div className="flex h-2 flex-1 max-w-[220px] rounded overflow-hidden bg-[--color-border]">

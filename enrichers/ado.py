@@ -241,11 +241,12 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
         # Load process type definitions (state names, colors, categories)
         type_defs: dict[str, list[dict]] = {}
         type_colors: dict[str, str] = {}
+        type_icons: dict[str, str] = {}
         try:
             pt_rows = cur.execute(
                 "SELECT type_name, states_json, color_hex, icon_id FROM process_types"
             ).fetchall()
-            for pt_name, states_json, color_hex, _icon in pt_rows:
+            for pt_name, states_json, color_hex, icon_id in pt_rows:
                 if states_json:
                     type_defs[pt_name] = json.loads(states_json)
                 if color_hex:
@@ -254,6 +255,8 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
                     if len(c) == 8 and c[:2].upper() == "FF":
                         c = c[2:]
                     type_colors[pt_name] = c
+                if icon_id:
+                    type_icons[pt_name] = icon_id
         except (sqlite3.OperationalError, sqlite3.DatabaseError):
             pass  # Older DBs may not have process_types
 
@@ -292,6 +295,7 @@ def _load_hierarchy(work_item_id: str, db_path: Path) -> dict | None:
             "ancestors": ancestors,
             "type_defs": type_defs,     # State definitions per type
             "type_colors": type_colors,  # Hex color per type name
+            "type_icons": type_icons,    # icon_id per type name
         }
     except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError):
         result = None
