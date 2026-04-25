@@ -2782,6 +2782,62 @@ async def action_restart(request: Request):
         return {"error": str(e)}
 
 
+@app.post("/api/action/stop")
+async def action_stop(request: Request):
+    """Terminate a running conductor workflow process."""
+    body = await request.json()
+    log_file = body.get("log_file", "")
+    if not log_file:
+        return {"error": "log_file required"}
+
+    # Parse the event log to get system PID
+    run = _parse_event_log(Path(log_file))
+    system_pid = _safe_int(run.system_meta.get("pid"))
+
+    if not system_pid or system_pid <= 0:
+        return {"error": "No PID found in workflow metadata"}
+
+    if not _is_pid_alive(system_pid):
+        # Process already dead — clean up PID file if present
+        _cleanup_pid_file(log_file, run.run_id)
+        return {"status": "already_stopped", "pid": system_pid}
+
+    # Terminate the process (hard kill)
+    try:
+        PROCESS_TERMINATE = 0x0001
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, system_pid)
+        if not handle:
+            return {"error": f"Cannot open process {system_pid} (access denied or not found)"}
+        success = kernel32.TerminateProcess(handle, 1)
+        kernel32.CloseHandle(handle)
+        if not success:
+            return {"error": f"TerminateProcess failed for PID {system_pid}"}
+    except Exception as e:
+        return {"error": f"Failed to terminate PID {system_pid}: {e}"}
+
+    # Clean up PID file
+    _cleanup_pid_file(log_file, run.run_id)
+
+    return {"status": "stopped", "pid": system_pid}
+
+
+def _cleanup_pid_file(log_file: str, run_id: str) -> None:
+    """Remove the .pid file matching this run, if any."""
+    if not PID_DIR.exists():
+        return
+    for p in PID_DIR.glob("*.pid"):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+            # Match by run_id or by log file path
+            if (run_id and data.get("run_id") == run_id) or \
+               (log_file and data.get("log_file") == log_file):
+                p.unlink(missing_ok=True)
+                return
+        except Exception:
+            continue
+
+
 _cwd_cache: dict[str, Path] = {}
 
 

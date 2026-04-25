@@ -4,6 +4,8 @@ import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
 import { DurationTicker } from '@/components/shared/DurationTicker';
 import { WorkItemIcon } from '@/components/shared/WorkItemIcon';
+import { ConfirmButton } from '@/components/shared/ConfirmButton';
+import { actionStop } from '@/lib/api';
 import { fmtCost2, fmtTokens } from '@/lib/format';
 import type { RunData } from '@/types/dashboard';
 
@@ -188,6 +190,14 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
               <ExternalLink size={9} />
             </a>
           )}
+          <span onClick={(e) => e.stopPropagation()}>
+            <ConfirmButton
+              label={isAbandoned ? 'Dismiss' : 'Stop'}
+              colorClass="border-red-600/40 text-red-400 hover:bg-red-900/20"
+              onClick={() => actionStop(run.log_file)}
+              successMessage={isAbandoned ? '🗑️ Run dismissed' : '🛑 Process stopped'}
+            />
+          </span>
         </div>
       </div>
 

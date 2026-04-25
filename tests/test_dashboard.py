@@ -639,6 +639,22 @@ class TestAPIEndpoints:
         assert "metrics" in data
         assert "runs_raw" in data
 
+    def test_action_stop_missing_log_file(self):
+        resp = self.client.post("/api/action/stop", json={})
+        data = resp.json()
+        assert data.get("error") == "log_file required"
+
+    def test_action_stop_no_pid(self, tmp_path: Path):
+        """A log file with no system metadata should return an error."""
+        log = tmp_path / "empty.events.jsonl"
+        log.write_text(json.dumps({
+            "type": "workflow_started", "timestamp": 1000,
+            "data": {"name": "demo", "agents": []},
+        }) + "\n")
+        resp = self.client.post("/api/action/stop", json={"log_file": str(log)})
+        data = resp.json()
+        assert "No PID" in data.get("error", "")
+
 
 # ===========================================================================
 # Workflow Composition (subworkflow depth tracking)
