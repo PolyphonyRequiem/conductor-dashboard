@@ -17,6 +17,7 @@ from dashboard import (
     WorkflowRun,
     _aggregate_costs,
     _aggregate_errors,
+    _compute_title_provider,
     _duration_str,
     _extract_purpose,
     _parse_event_log,
@@ -516,6 +517,66 @@ class TestSerializeRun:
         result = _serialize_run(run, {})
         assert result["gate_waiting"] is True
         assert result["gate_agent"] == "reviewer"
+
+    def test_title_provider_with_work_item(self):
+        run = WorkflowRun(
+            name="plan-and-implement",
+            status="completed",
+            started_at=1000.0,
+            ended_at=1100.0,
+            work_item_id="42",
+            work_item_title="Fix login bug",
+        )
+        result = _serialize_run(run, {})
+        assert result["title_provider"] == "work_item"
+        assert result["display_title"] == "Fix login bug"
+
+    def test_title_provider_work_item_no_title(self):
+        run = WorkflowRun(
+            name="plan-and-implement",
+            status="completed",
+            started_at=1000.0,
+            ended_at=1100.0,
+            work_item_id="99",
+        )
+        result = _serialize_run(run, {})
+        assert result["title_provider"] == "work_item"
+        assert result["display_title"] == "#99"
+
+    def test_title_provider_empty_when_no_work_item(self):
+        run = WorkflowRun(
+            name="simple-workflow",
+            status="completed",
+            started_at=1000.0,
+            ended_at=1100.0,
+        )
+        result = _serialize_run(run, {})
+        assert result["title_provider"] == ""
+        assert result["display_title"] == ""
+
+
+class TestComputeTitleProvider:
+    """Tests for _compute_title_provider helper."""
+
+    def test_work_item_with_title(self):
+        tp, dt = _compute_title_provider("123", "My Epic")
+        assert tp == "work_item"
+        assert dt == "My Epic"
+
+    def test_work_item_without_title(self):
+        tp, dt = _compute_title_provider("456", "")
+        assert tp == "work_item"
+        assert dt == "#456"
+
+    def test_no_work_item(self):
+        tp, dt = _compute_title_provider("", "")
+        assert tp == ""
+        assert dt == ""
+
+    def test_no_work_item_but_has_title(self):
+        tp, dt = _compute_title_provider("", "Some title")
+        assert tp == ""
+        assert dt == ""
 
 
 # ===========================================================================

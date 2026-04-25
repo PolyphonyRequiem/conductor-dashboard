@@ -21,6 +21,7 @@ function filterRuns(runs: RunData[], filterText: string): RunData[] {
   const q = filterText.toLowerCase();
   return runs.filter(r =>
     (r.name || '').toLowerCase().includes(q) ||
+    (r.display_title || '').toLowerCase().includes(q) ||
     (r.work_item_id || '').toLowerCase().includes(q) ||
     (r.work_item_title || '').toLowerCase().includes(q) ||
     (r.purpose || '').toLowerCase().includes(q) ||

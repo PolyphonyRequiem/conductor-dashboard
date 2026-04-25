@@ -39,30 +39,41 @@ export function PowerlineBreadcrumbs({ run }: Props) {
   const activeAgentType = run.current_agent_type || 'agent';
 
   const total = segments.length + (activeAgent ? 1 : 0);
+  const displayTitle = run.display_title || '';
 
   return (
-    <div className="flex items-stretch shrink-0">
-      {segments.map((seg, i) => {
-        const isLast = !activeAgent && i === segments.length - 1;
-        return (
+    <div className="flex items-center gap-2 min-w-0 flex-1">
+      <div className="flex items-stretch shrink-0">
+        {segments.map((seg, i) => {
+          const isLast = !activeAgent && i === segments.length - 1;
+          return (
+            <div
+              key={i}
+              className={segmentClasses(seg.isActive, false, i === 0, isLast, total)}
+              style={seg.isActive ? { animation: 'pl-active-pulse 2.5s ease-in-out infinite' } : undefined}
+            >
+              <Layers size={14} className="shrink-0" />
+              <span>{seg.name}</span>
+            </div>
+          );
+        })}
+        {activeAgent && (
           <div
-            key={i}
-            className={segmentClasses(seg.isActive, false, i === 0, isLast, total)}
-            style={seg.isActive ? { animation: 'pl-active-pulse 2.5s ease-in-out infinite' } : undefined}
+            className={segmentClasses(false, true, false, true, total)}
+            style={{ animation: 'pl-agent-pulse 2.5s ease-in-out infinite' }}
           >
-            <Layers size={14} className="shrink-0" />
-            <span>{seg.name}</span>
+            <AgentTypeIcon type={activeAgentType} size={14} className="shrink-0" />
+            <span>{activeAgent}</span>
           </div>
-        );
-      })}
-      {activeAgent && (
-        <div
-          className={segmentClasses(false, true, false, true, total)}
-          style={{ animation: 'pl-agent-pulse 2.5s ease-in-out infinite' }}
+        )}
+      </div>
+      {displayTitle && (
+        <span
+          className="text-xs text-[--color-text2] truncate min-w-0"
+          title={displayTitle}
         >
-          <AgentTypeIcon type={activeAgentType} size={14} className="shrink-0" />
-          <span>{activeAgent}</span>
-        </div>
+          — {displayTitle}
+        </span>
       )}
     </div>
   );

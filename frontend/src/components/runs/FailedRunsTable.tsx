@@ -86,7 +86,14 @@ function FailedRow({ run, isExpanded, isReviewed, onToggleExpand, onToggleReview
         <td className="px-3 py-2">
           <ChevronRight size={12} className={`text-[--color-text2] transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
         </td>
-        <td className="px-3 py-2 font-semibold text-[--color-accent]">{run.name}</td>
+        <td className="px-3 py-2 font-semibold text-[--color-accent]">
+          {run.name}
+          {run.display_title && (
+            <div className="text-xs font-normal text-[--color-text2] truncate max-w-[300px]" title={run.display_title}>
+              {run.display_title}
+            </div>
+          )}
+        </td>
         <td className="px-3 py-2">
           {run.error_type && (
             <span className="px-1.5 py-0.5 rounded text-xs bg-red-900/50 text-red-300">{run.error_type}</span>

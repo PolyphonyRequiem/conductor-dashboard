@@ -2357,6 +2357,18 @@ async def ws_proxy(websocket: WebSocket, log_file: str):
         await websocket.close(code=4002, reason="Cannot connect to conductor instance")
 
 
+def _compute_title_provider(work_item_id: str, work_item_title: str) -> tuple[str, str]:
+    """Derive the title provider and display title for a workflow run.
+
+    Returns (title_provider, display_title).
+    Currently the only provider is "work_item" — keyed off work_item_id presence.
+    """
+    if work_item_id:
+        display = work_item_title or f"#{work_item_id}"
+        return ("work_item", display)
+    return ("", "")
+
+
 def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
                    skip_enrichment: bool = False) -> dict:
     """Convert a WorkflowRun to a JSON-serializable dict."""
@@ -2407,6 +2419,7 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     # Fast path: skip expensive CWD resolution and enrichers for runs
     # the user has already reviewed or that are abandoned/interrupted.
     if skip_enrichment:
+        tp, dt = _compute_title_provider(r.work_item_id, r.work_item_title)
         return {
             "log_file": r.log_file,
             "name": r.name,
@@ -2440,6 +2453,8 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
             "work_item_title": r.work_item_title,
             "work_item_type": r.work_item_type,
             "work_item_url": "",
+            "title_provider": tp,
+            "display_title": dt,
             "run_id": r.run_id,
             "metadata": r.metadata,
             "system_meta": r.system_meta,
@@ -2513,6 +2528,9 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     ado_data = enrichments.get("ado", {})
     git_data = enrichments.get("git", {})
 
+    effective_wi_title = r.work_item_title or ado_data.get("twig_title", "")
+    tp, dt = _compute_title_provider(r.work_item_id, effective_wi_title)
+
     return {
         "log_file": r.log_file,
         "name": r.name,
@@ -2543,9 +2561,11 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
         "iteration": r.iteration,
         "purpose": r.purpose,
         "work_item_id": r.work_item_id,
-        "work_item_title": r.work_item_title or ado_data.get("twig_title", ""),
+        "work_item_title": effective_wi_title,
         "work_item_type": r.work_item_type or ado_data.get("twig_type", ""),
         "work_item_url": ado_data.get("work_item_url", ""),
+        "title_provider": tp,
+        "display_title": dt,
         "run_id": r.run_id,
         "metadata": r.metadata,
         "system_meta": r.system_meta,

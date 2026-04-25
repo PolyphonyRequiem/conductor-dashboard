@@ -70,6 +70,8 @@ export interface RunData {
   work_item_title: string;
   work_item_type: string;
   work_item_url: string;
+  title_provider: string;
+  display_title: string;
   run_id: string;
   metadata: Record<string, unknown>;
   system_meta: SystemMeta;

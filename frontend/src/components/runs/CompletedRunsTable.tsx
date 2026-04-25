@@ -92,7 +92,14 @@ function RunRow({
         <td className="px-3 py-2">
           <ChevronRight size={12} className={`text-[--color-text2] transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
         </td>
-        <td className="px-3 py-2 font-semibold text-[--color-accent]">{run.name}</td>
+        <td className="px-3 py-2 font-semibold text-[--color-accent]">
+          {run.name}
+          {run.display_title && (
+            <div className="text-xs font-normal text-[--color-text2] truncate max-w-[300px]" title={run.display_title}>
+              {run.display_title}
+            </div>
+          )}
+        </td>
         <td className="px-3 py-2 text-[--color-text2] text-xs whitespace-nowrap">{run.started_at_str}</td>
         <td className="px-3 py-2">{run.elapsed}</td>
         <td className="px-3 py-2 text-right">{run.cost_str}</td>
