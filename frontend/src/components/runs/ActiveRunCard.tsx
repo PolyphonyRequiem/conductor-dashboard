@@ -20,7 +20,7 @@ function GroupDivider({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[--color-text2] opacity-60 mt-1 mb-0.5 pl-1">
       <span>{label}</span>
-      <span className="h-px flex-1 bg-[--color-text2] opacity-30" />
+      <span className="h-px flex-1" style={{ backgroundColor: '#484f58' }} />
     </div>
   );
 }
@@ -187,9 +187,9 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     <div
       className={`relative bg-[--color-surface] border border-[--color-border] rounded-lg overflow-visible border-l-3 ${displayTitle ? 'mt-4' : ''} mb-3 ${borderClass} ${isAbandoned ? 'opacity-65' : ''}`}
     >
-      {/* Title overlay on top border */}
+      {/* Title overlay on top border — px-3 masks the border line behind the text */}
       {displayTitle && (
-        <span className="absolute -top-2.5 left-8 px-2 text-xs font-bold text-[--color-text] bg-[--color-surface] truncate max-w-[60%]">
+        <span className="absolute -top-2.5 left-8 px-3 text-xs font-bold text-[--color-text] bg-[--color-surface] truncate max-w-[60%]">
           {displayTitle}
         </span>
       )}
