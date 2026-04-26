@@ -31,11 +31,13 @@ export function PowerlineBreadcrumbs({ run }: Props) {
   for (let i = 0; i < runningSubs.length; i++) {
     const sw = runningSubs[i]!;
     const swName = (sw.workflow || '').replace('./', '').replace('.yaml', '');
+    // Conductor's deep-link expects the parent agent name that invokes the subworkflow
+    const swAgent = sw.agent || swName;
     segments.push({
       name: swName,
       type: 'workflow',
       isActive: i === runningSubs.length - 1,
-      href: dashUrl ? `${dashUrl}?subworkflow=${encodeURIComponent(swName)}` : undefined,
+      href: dashUrl ? `${dashUrl}?subworkflow=${encodeURIComponent(swAgent)}` : undefined,
     });
   }
 
