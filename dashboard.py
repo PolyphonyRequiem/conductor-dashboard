@@ -148,6 +148,50 @@ def _is_pid_alive(pid: int) -> bool:
         return False
 
 
+def _is_pid_from_run(pid: int, run_started_at: float) -> bool:
+    """Return True only if *pid* belongs to the process that started the run.
+
+    Windows aggressively reuses PIDs, so a bare OpenProcess check produces
+    false positives.  This function cross-checks the process creation time
+    against the run's start timestamp — if the process was created well after
+    the run started, it's a different process that reused the PID.
+    """
+    if pid <= 0 or not run_started_at:
+        return False
+    try:
+        import ctypes.wintypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            creation = ctypes.wintypes.FILETIME()
+            exit_ft = ctypes.wintypes.FILETIME()
+            kern = ctypes.wintypes.FILETIME()
+            user = ctypes.wintypes.FILETIME()
+            if not kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(creation), ctypes.byref(exit_ft),
+                ctypes.byref(kern), ctypes.byref(user),
+            ):
+                return False
+            # Convert FILETIME (100ns ticks since 1601-01-01) to Unix epoch
+            EPOCH_DIFF = 116444736000000000
+            ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+            create_time = (ticks - EPOCH_DIFF) / 10_000_000
+            # The conductor process is created slightly before it writes the
+            # workflow_started event, so create_time should be ≤ run_started_at
+            # (with a small margin for clock granularity).  A process created
+            # significantly after the run started is PID reuse.
+            return (create_time - run_started_at) < 30 and \
+                   (run_started_at - create_time) < 120
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+
 def _is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.05) -> bool:
     """Return True if something is actually listening on *port*.
 
@@ -525,9 +569,13 @@ def _load_event_logs(
             cached = _parsed_log_cache.get(key)
             if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
                 run = cached[2]
-                # Re-evaluate mtime-based status for cached runs
+                # Re-evaluate mtime-based status for cached runs.
+                # Previous polls may have promoted status to "running" via
+                # liveness checks (Fix #1–#4).  Reset non-terminal runs so
+                # that liveness is re-evaluated from scratch each poll —
+                # otherwise a dead process stays "running" in cache forever.
                 recently_modified = (now - st.st_mtime) < 300
-                if run.status == "unknown":
+                if run.status in ("unknown", "running") and not run.ended_at:
                     run.status = "running" if recently_modified else "interrupted"
                 elif recently_modified and run.status in ("failed", "completed"):
                     if run.ended_at and (st.st_mtime - run.ended_at > 30):
@@ -588,15 +636,15 @@ def _load_event_logs(
 
         # Fix #4: system metadata PID-based liveness (supplementary, not authoritative).
         # If system.pid is present and alive, promote non-terminal runs to "running".
-        # PID alone is a weak signal on Windows (PID reuse), so we gate it on a
-        # time window: the run must have started within the last 24 hours.
+        # Uses _is_pid_from_run to cross-check process creation time against
+        # the run's start time, preventing false positives from Windows PID reuse.
         system_pid = _safe_int(run.system_meta.get("pid"))
         if (
             system_pid
             and run.status not in ("running", "completed", "failed")
             and run.started_at
             and (now - run.started_at) < 86400  # 24h window for PID trust
-            and _is_pid_alive(system_pid)
+            and _is_pid_from_run(system_pid, run.started_at)
         ):
             run.status = "running"
 
@@ -2386,14 +2434,15 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
 
     # Liveness detection priority:
     # 1. Dashboard port (authoritative — verified via netstat + HTTP probe)
-    # 2. System PID (supplementary — gated on 24h time window to mitigate PID reuse)
+    # 2. System PID (supplementary — cross-checked via process creation time)
     # 3. Log mtime heuristic (legacy fallback)
     #
     # If system metadata provides a dashboard_port that discovery missed
-    # (e.g., port was probed before event log was parsed), try it directly.
+    # (e.g., port was probed before event log was parsed), try it directly
+    # — but only if the port is actually listening.
     if not dashboard_port:
         sys_port = _safe_int(r.system_meta.get("dashboard_port"))
-        if sys_port and sys_port != _dashboard_port:
+        if sys_port and sys_port != _dashboard_port and _is_port_listening(sys_port):
             dashboard_port = sys_port
 
     now = time.time()
@@ -2405,17 +2454,21 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
             # Name-matched port could belong to a different run with the same
             # workflow name. Cross-check with the system PID to avoid false positives.
             system_pid = _safe_int(r.system_meta.get("pid"))
-            process_alive = bool(system_pid and _is_pid_alive(system_pid))
+            process_alive = bool(
+                system_pid and r.started_at
+                and _is_pid_from_run(system_pid, r.started_at)
+            )
             if not process_alive:
                 dashboard_port = None  # Don't show a stale dashboard link
     else:
         # PID check: supplement when no dashboard port, gated on time window
+        # and cross-checked against process creation time to prevent PID reuse.
         system_pid = _safe_int(r.system_meta.get("pid"))
         if (
             system_pid
             and r.started_at
             and (now - r.started_at) < 86400
-            and _is_pid_alive(system_pid)
+            and _is_pid_from_run(system_pid, r.started_at)
         ):
             process_alive = True
         elif r.log_file:
@@ -2813,6 +2866,13 @@ async def action_stop(request: Request):
         # Process already dead — clean up PID file if present
         _cleanup_pid_file(log_file, run.run_id)
         return {"status": "already_stopped", "pid": system_pid}
+
+    # Guard against Windows PID reuse: verify the process creation time
+    # matches the run start time before terminating.
+    if run.started_at and not _is_pid_from_run(system_pid, run.started_at):
+        _cleanup_pid_file(log_file, run.run_id)
+        return {"status": "already_stopped", "pid": system_pid,
+                "detail": "PID was reused by a different process"}
 
     # Terminate the process (hard kill)
     try:
