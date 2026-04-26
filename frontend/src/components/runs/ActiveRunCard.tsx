@@ -15,13 +15,12 @@ interface Props {
   keyPrefix: string;
 }
 
-/** Thin labeled divider for enrichment groups */
+/** Thin labeled divider for enrichment groups — left-justified */
 function GroupDivider({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[--color-text2] opacity-50 mt-0.5">
-      <span className="h-px flex-1 bg-[--color-border]" />
+    <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[--color-text2] opacity-60 mt-1 mb-0.5 pl-1">
       <span>{label}</span>
-      <span className="h-px flex-1 bg-[--color-border]" />
+      <span className="h-px flex-1 bg-[--color-text2] opacity-30" />
     </div>
   );
 }
@@ -182,10 +181,18 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
 
   const hasEnrichments = gitBadges.length > 0 || adoBadges.length > 0;
 
+  const displayTitle = run.display_title || '';
+
   return (
     <div
-      className={`bg-[--color-surface] border border-[--color-border] rounded-lg overflow-hidden border-l-3 mb-3 ${borderClass} ${isAbandoned ? 'opacity-65' : ''}`}
+      className={`relative bg-[--color-surface] border border-[--color-border] rounded-lg overflow-visible border-l-3 ${displayTitle ? 'mt-4' : ''} mb-3 ${borderClass} ${isAbandoned ? 'opacity-65' : ''}`}
     >
+      {/* Title overlay on top border */}
+      {displayTitle && (
+        <span className="absolute -top-2.5 left-8 px-2 text-xs font-bold text-[--color-text] bg-[--color-surface] truncate max-w-[60%]">
+          {displayTitle}
+        </span>
+      )}
       {/* Row 1: Breadcrumbs + status + stop */}
       <div
         className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-[--color-surface-hover] transition-colors"
