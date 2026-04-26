@@ -2376,8 +2376,11 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
     """Convert a WorkflowRun to a JSON-serializable dict."""
     # Find matching dashboard port — prefer exact run_id match, fall back to name
     dashboard_port = None
+    port_match_exact = False
     if r.run_id:
         dashboard_port = name_to_port.get(r.run_id)
+        if dashboard_port:
+            port_match_exact = True
     if not dashboard_port:
         dashboard_port = name_to_port.get(r.name)
 
@@ -2395,7 +2398,16 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
 
     now = time.time()
     if dashboard_port:
-        process_alive = True
+        if port_match_exact:
+            # run_id matched — port is authoritative for this specific run
+            process_alive = _is_port_listening(dashboard_port)
+        else:
+            # Name-matched port could belong to a different run with the same
+            # workflow name. Cross-check with the system PID to avoid false positives.
+            system_pid = _safe_int(r.system_meta.get("pid"))
+            process_alive = bool(system_pid and _is_pid_alive(system_pid))
+            if not process_alive:
+                dashboard_port = None  # Don't show a stale dashboard link
     else:
         # PID check: supplement when no dashboard port, gated on time window
         system_pid = _safe_int(r.system_meta.get("pid"))

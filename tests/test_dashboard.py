@@ -483,18 +483,19 @@ class TestSerializeRun:
         assert "123" in result["work_item_url"]
 
     def test_dashboard_port_exact_match(self):
-        run = WorkflowRun(name="demo", started_at=5000.0, ended_at=5100.0, status="completed")
-        name_to_port = {"demo": 49999}
+        run = WorkflowRun(name="demo", run_id="run-abc", started_at=5000.0, ended_at=5100.0, status="completed")
+        name_to_port = {"run-abc": 49999}
         result = _serialize_run(run, name_to_port)
         assert result["dashboard_port"] == 49999
         assert "49999" in result["dashboard_url"]
 
     def test_dashboard_port_fuzzy_match(self):
-        """Name-based matching: exact name match required."""
+        """Name-based matching requires PID to be alive for liveness."""
         run = WorkflowRun(name="demo", started_at=5000.0, ended_at=5100.0, status="completed")
         name_to_port = {"demo": 50001}
         result = _serialize_run(run, name_to_port)
-        assert result["dashboard_port"] == 50001
+        # Name-matched port with no PID → port cleared, not alive
+        assert result["dashboard_port"] is None
 
     def test_no_dashboard_port(self):
         run = WorkflowRun(name="demo", started_at=5000.0, ended_at=5100.0, status="completed")
