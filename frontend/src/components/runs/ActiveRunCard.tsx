@@ -187,11 +187,11 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     <div
       className={`relative bg-[--color-surface] border border-[--color-border] rounded-lg overflow-visible border-l-3 ${displayTitle ? 'mt-4' : ''} mb-3 ${borderClass} ${isAbandoned ? 'opacity-65' : ''}`}
     >
-      {/* Title overlay on top border */}
+      {/* Title overlay on top border — bg matches page background behind the border */}
       {displayTitle && (
         <span
           className="absolute -top-2.5 left-8 z-10 px-3 text-xs font-bold text-[--color-text] truncate max-w-[60%]"
-          style={{ backgroundColor: '#161b22' }}
+          style={{ backgroundColor: '#0d1117' }}
         >
           {displayTitle}
         </span>
