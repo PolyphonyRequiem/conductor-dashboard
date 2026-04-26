@@ -193,7 +193,7 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
           {displayTitle}
         </span>
       )}
-      {/* Row 1: Breadcrumbs + status + stop */}
+      {/* Row 1: Breadcrumbs + metrics + status + stop */}
       <div
         className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-[--color-surface-hover] transition-colors"
         onClick={() => toggleExpand(key)}
@@ -204,6 +204,29 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
         />
         <PowerlineBreadcrumbs run={run} />
         <div className="flex items-center gap-2.5 ml-auto shrink-0">
+          {run.status === 'running' && run.started_at && (
+            <span className="inline-flex items-center gap-1 text-[--color-text2] text-xs">
+              <Clock size={10} />
+              <DurationTicker startedAt={run.started_at} className="tabular-nums" />
+            </span>
+          )}
+          {run.total_cost > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-xs text-yellow-300 tabular-nums">
+              <DollarSign size={10} />
+              {fmtCost2(run.total_cost)}
+            </span>
+          )}
+          {run.total_tokens > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-xs text-cyan-300 tabular-nums">
+              <Zap size={10} />
+              {fmtTokens(run.total_tokens)}
+            </span>
+          )}
+          {run.iteration > 1 && (
+            <span className="text-xs text-purple-300 tabular-nums">
+              iter {run.iteration}
+            </span>
+          )}
           {statusLabel}
           <span onClick={(e) => e.stopPropagation()}>
             <ConfirmButton
@@ -214,36 +237,6 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
             />
           </span>
         </div>
-      </div>
-
-      {/* Row 2: Metrics (cost, tokens, duration) */}
-      <div
-        className="flex items-center gap-3 px-4 pb-2 pl-10 text-xs cursor-pointer"
-        onClick={() => toggleExpand(key)}
-      >
-        {run.status === 'running' && run.started_at && (
-          <span className="inline-flex items-center gap-1 text-[--color-text2]">
-            <Clock size={10} />
-            <DurationTicker startedAt={run.started_at} className="tabular-nums" />
-          </span>
-        )}
-        {run.total_cost > 0 && (
-          <span className="inline-flex items-center gap-0.5 text-yellow-300 tabular-nums">
-            <DollarSign size={10} />
-            {fmtCost2(run.total_cost)}
-          </span>
-        )}
-        {run.total_tokens > 0 && (
-          <span className="inline-flex items-center gap-0.5 text-cyan-300 tabular-nums">
-            <Zap size={10} />
-            {fmtTokens(run.total_tokens)}
-          </span>
-        )}
-        {run.iteration > 1 && (
-          <span className="text-purple-300 tabular-nums">
-            iter {run.iteration}
-          </span>
-        )}
       </div>
 
       {/* Enrichment groups */}
