@@ -94,17 +94,20 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
       const hexColor = typeColor ? `#${typeColor}` : '#888';
       const iconId = run.hierarchy.type_icons?.[lv.type] ?? 'icon_clipboard';
 
+      // If nothing is started or completed, dim the whole badge
+      const allUnstarted = completedCount === 0 && inProgressCount === 0;
+
       badges.push(
         <span
           key={`lvl-${lv.type}`}
-          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-[--color-text2]"
+          className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${allUnstarted ? 'text-[--color-text2] opacity-50' : 'text-[--color-text2]'}`}
           style={{
-            borderColor: `${hexColor}40`,
-            backgroundColor: `${hexColor}15`,
+            borderColor: allUnstarted ? 'var(--color-border)' : `${hexColor}40`,
+            backgroundColor: allUnstarted ? 'transparent' : `${hexColor}15`,
           }}
-          title={`${lv.type}: ${completedCount} done, ${inProgressCount} in progress, ${total} total`}
+          title={`${lv.type}: ${completedCount} done, ${inProgressCount} in progress, ${total - completedCount - inProgressCount} not started, ${total} total`}
         >
-          <WorkItemIcon iconId={iconId} color={hexColor} size={12} />
+          <WorkItemIcon iconId={iconId} color={allUnstarted ? '#555' : hexColor} size={12} />
           {total > 1 && (
             <>
               <span className="flex gap-px h-1.5 w-8 rounded overflow-hidden bg-[--color-border]">
