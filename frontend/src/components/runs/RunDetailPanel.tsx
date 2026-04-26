@@ -90,9 +90,13 @@ export function RunDetailPanel({ run }: Props) {
             const total = level.total || 1;
             const typeDefs = hierarchy.type_defs?.[level.type] ?? [];
             const segments = buildStateSegments(level.states, typeDefs, total);
-            const completedCount = typeDefs
-              .filter((d) => d.category === 'Completed')
-              .reduce((sum, d) => sum + (level.states[d.name] ?? 0), 0);
+            const completedCount = typeDefs.length > 0
+              ? typeDefs
+                  .filter((d) => d.category === 'Completed')
+                  .reduce((sum, d) => sum + (level.states[d.name] ?? 0), 0)
+              : Object.entries(level.states)
+                  .filter(([name]) => guessCategory(name) === 'Completed')
+                  .reduce((sum, [, cnt]) => sum + cnt, 0);
             const typeColor = hierarchy.type_colors?.[level.type];
             const iconId = hierarchy.type_icons?.[level.type] ?? 'icon_clipboard';
 
@@ -168,6 +172,15 @@ interface StateSegment {
   category: string;
 }
 
+/** Heuristic: guess the ADO state category from the state name */
+function guessCategory(name: string): string {
+  const s = name.toLowerCase();
+  if (['done', 'closed', 'completed', 'resolved'].includes(s)) return 'Completed';
+  if (['doing', 'active', 'started', 'in progress', 'committed'].includes(s)) return 'InProgress';
+  if (['removed', 'cut'].includes(s)) return 'Removed';
+  return 'Proposed';
+}
+
 /** Build ordered progress bar segments from raw state counts + type definitions.
  *  Order follows the process template (Proposed → InProgress → Completed → Removed),
  *  rendered right-to-left so Completed is on the left (filled first). */
@@ -177,16 +190,21 @@ function buildStateSegments(
   total: number,
 ): StateSegment[] {
   if (defs.length === 0) {
-    // Fallback: no type defs, render raw state counts with heuristic colors
+    // Fallback: no type defs, use heuristic category detection
+    const categoryOrder = ['Completed', 'InProgress', 'Proposed', 'Removed'];
     return Object.entries(states)
       .filter(([, cnt]) => cnt > 0)
-      .map(([name, count]) => ({
-        name,
-        count,
-        pct: Math.round((count / total) * 100),
-        color: categoryBarColor('Proposed'),
-        category: 'Proposed',
-      }));
+      .map(([name, count]) => {
+        const cat = guessCategory(name);
+        return {
+          name,
+          count,
+          pct: Math.round((count / total) * 100),
+          color: categoryBarColor(cat),
+          category: cat,
+        };
+      })
+      .sort((a, b) => categoryOrder.indexOf(a.category) - categoryOrder.indexOf(b.category));
   }
 
   // Desired render order: Completed first (left), then InProgress, Proposed, Removed

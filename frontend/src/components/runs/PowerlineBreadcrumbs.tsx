@@ -28,24 +28,30 @@ export function PowerlineBreadcrumbs({ run }: Props) {
     href: dashUrl || undefined,
   });
 
+  // Build slash-separated subworkflow path for deep-linking
+  const subworkflowPath: string[] = [];
   for (let i = 0; i < runningSubs.length; i++) {
     const sw = runningSubs[i]!;
     const swName = (sw.workflow || '').replace('./', '').replace('.yaml', '');
-    // Conductor's deep-link expects the parent agent name that invokes the subworkflow
     const swAgent = sw.agent || swName;
+    subworkflowPath.push(swAgent);
+    const pathStr = subworkflowPath.join('/');
     segments.push({
       name: swName,
       type: 'workflow',
       isActive: i === runningSubs.length - 1,
-      href: dashUrl ? `${dashUrl}?subworkflow=${encodeURIComponent(swAgent)}` : undefined,
+      href: dashUrl ? `${dashUrl}?subworkflow=${encodeURIComponent(pathStr)}` : undefined,
     });
   }
 
   // Active agent as final segment
   const activeAgent = run.current_agent || '';
   const activeAgentType = run.current_agent_type || 'agent';
+  const subParam = subworkflowPath.length > 0
+    ? `subworkflow=${encodeURIComponent(subworkflowPath.join('/'))}&`
+    : '';
   const agentHref = dashUrl && activeAgent
-    ? `${dashUrl}?agent=${encodeURIComponent(activeAgent)}`
+    ? `${dashUrl}?${subParam}agent=${encodeURIComponent(activeAgent)}`
     : undefined;
 
   const total = segments.length + (activeAgent ? 1 : 0);
