@@ -1,4 +1,4 @@
-import { ChevronRight, GitBranch, DollarSign, Zap } from 'lucide-react';
+import { ChevronRight, ExternalLink, GitBranch, DollarSign, Zap, Tag, Clock } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
@@ -13,6 +13,17 @@ interface Props {
   run: RunData;
   index: number;
   keyPrefix: string;
+}
+
+/** Thin labeled divider for enrichment groups */
+function GroupDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[--color-text2] opacity-50 mt-0.5">
+      <span className="h-px flex-1 bg-[--color-border]" />
+      <span>{label}</span>
+      <span className="h-px flex-1 bg-[--color-border]" />
+    </div>
+  );
 }
 
 export function ActiveRunCard({ run, index, keyPrefix }: Props) {
@@ -47,19 +58,19 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-900/40 text-blue-300">Idle</span>
   );
 
-  // Enrichment badges for Row 2
-  const badges: React.ReactNode[] = [];
+  // --- Enrichment groups ---
 
+  // Git group
+  const gitBadges: React.ReactNode[] = [];
   if (run.worktree?.name) {
-    badges.push(
+    gitBadges.push(
       <span key="wt" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-orange-900/30 border border-orange-700/40 text-orange-300 truncate max-w-[200px]">
         📦 <span className="truncate">{run.worktree.name}</span>
       </span>,
     );
   }
-
   if (run.worktree?.branch) {
-    badges.push(
+    gitBadges.push(
       <span key="br" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-900/30 border border-green-700/40 text-green-300 truncate max-w-[300px]">
         <GitBranch size={10} className="shrink-0" />
         <span className="truncate">{run.worktree.branch}</span>
@@ -67,6 +78,56 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     );
   }
 
+  // ADO group
+  const adoBadges: React.ReactNode[] = [];
+
+  // Work item title badge (moved from breadcrumbs)
+  if (run.work_item_id) {
+    const wiType = run.work_item_type || '';
+    const typeColor = run.hierarchy?.type_colors?.[wiType];
+    const hex = typeColor ? `#${typeColor}` : '#58a6ff';
+    const iconId = run.hierarchy?.type_icons?.[wiType] ?? (wiType ? 'icon_clipboard' : '');
+    const title = run.display_title && run.display_title !== `#${run.work_item_id}` ? run.display_title : '';
+    const badge = (
+      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border truncate max-w-[400px]" style={{ borderColor: `${hex}40`, backgroundColor: `${hex}15`, color: hex }}>
+        {iconId && <WorkItemIcon iconId={iconId} color={hex} size={12} />}
+        <span className="font-medium">#{run.work_item_id}</span>
+        {title && <span className="truncate opacity-80">{title}</span>}
+        {run.work_item_url && <ExternalLink size={9} className="shrink-0 opacity-50" />}
+      </span>
+    );
+    adoBadges.push(
+      run.work_item_url ? (
+        <a key="wi" href={run.work_item_url} target="_blank" rel="noopener noreferrer" className="hover:brightness-125 transition-all" onClick={(e) => e.stopPropagation()}>
+          {badge}
+        </a>
+      ) : <span key="wi">{badge}</span>,
+    );
+  }
+
+  // Tags
+  const allTags = run.display_tags || [];
+  if (allTags.length > 0) {
+    const maxTags = 3;
+    const visibleTags = allTags.slice(0, maxTags);
+    for (const tag of visibleTags) {
+      adoBadges.push(
+        <span key={`tag-${tag}`} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/30 border border-purple-700/30 text-purple-300">
+          <Tag size={8} className="shrink-0 opacity-60" />
+          {tag}
+        </span>,
+      );
+    }
+    if (allTags.length > maxTags) {
+      adoBadges.push(
+        <span key="tag-overflow" className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-900/20 border border-purple-700/20 text-purple-400 tabular-nums" title={allTags.slice(maxTags).join(', ')}>
+          +{allTags.length - maxTags}
+        </span>,
+      );
+    }
+  }
+
+  // Hierarchy level badges
   if (run.hierarchy?.levels && run.hierarchy.levels.length > 0) {
     for (const lv of run.hierarchy.levels) {
       const total = lv.total || 0;
@@ -90,34 +151,25 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
             .filter(([name]) => ['doing', 'started', 'active', 'committed', 'in progress'].includes(name.toLowerCase()))
             .reduce((sum, [, cnt]) => sum + cnt, 0);
 
-      const typeColor = run.hierarchy.type_colors?.[lv.type];
-      const hexColor = typeColor ? `#${typeColor}` : '#888';
-      const iconId = run.hierarchy.type_icons?.[lv.type] ?? 'icon_clipboard';
+      const lvTypeColor = run.hierarchy.type_colors?.[lv.type];
+      const lvHex = lvTypeColor ? `#${lvTypeColor}` : '#888';
+      const lvIconId = run.hierarchy.type_icons?.[lv.type] ?? 'icon_clipboard';
       const unstartedCount = total - completedCount - inProgressCount;
 
-      badges.push(
+      adoBadges.push(
         <span
           key={`lvl-${lv.type}`}
           className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-[--color-text2]"
-          style={{
-            borderColor: `${hexColor}40`,
-            backgroundColor: `${hexColor}15`,
-          }}
+          style={{ borderColor: `${lvHex}40`, backgroundColor: `${lvHex}15` }}
           title={`${lv.type}: ${completedCount} done, ${inProgressCount} in progress, ${unstartedCount} not started, ${total} total`}
         >
-          <WorkItemIcon iconId={iconId} color={hexColor} size={12} />
+          <WorkItemIcon iconId={lvIconId} color={lvHex} size={12} />
           {total > 1 && (
             <>
               <span className="flex gap-px h-1.5 w-8 rounded overflow-hidden bg-[--color-border]">
-                {completedCount > 0 && (
-                  <span style={{ width: `${Math.round((completedCount / total) * 100)}%`, backgroundColor: '#3fb950' }} />
-                )}
-                {inProgressCount > 0 && (
-                  <span style={{ width: `${Math.round((inProgressCount / total) * 100)}%`, backgroundColor: '#58a6ff' }} />
-                )}
-                {unstartedCount > 0 && (
-                  <span style={{ width: `${Math.round((unstartedCount / total) * 100)}%`, backgroundColor: '#484f58' }} />
-                )}
+                {completedCount > 0 && <span style={{ width: `${Math.round((completedCount / total) * 100)}%`, backgroundColor: '#3fb950' }} />}
+                {inProgressCount > 0 && <span style={{ width: `${Math.round((inProgressCount / total) * 100)}%`, backgroundColor: '#58a6ff' }} />}
+                {unstartedCount > 0 && <span style={{ width: `${Math.round((unstartedCount / total) * 100)}%`, backgroundColor: '#484f58' }} />}
               </span>
               <span className="tabular-nums">{completedCount}/{total}</span>
             </>
@@ -128,40 +180,13 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     }
   }
 
-  // Title-line inline metrics
-  const titleMetrics: React.ReactNode[] = [];
-
-  if (run.iteration > 1) {
-    titleMetrics.push(
-      <span key="it" className="text-xs text-purple-300 tabular-nums">
-        iter {run.iteration}
-      </span>,
-    );
-  }
-
-  if (run.total_cost > 0) {
-    titleMetrics.push(
-      <span key="cost" className="inline-flex items-center gap-0.5 text-xs text-yellow-300 tabular-nums">
-        <DollarSign size={10} />
-        {fmtCost2(run.total_cost)}
-      </span>,
-    );
-  }
-
-  if (run.total_tokens > 0) {
-    titleMetrics.push(
-      <span key="tok" className="inline-flex items-center gap-0.5 text-xs text-cyan-300 tabular-nums">
-        <Zap size={10} />
-        {fmtTokens(run.total_tokens)}
-      </span>,
-    );
-  }
+  const hasEnrichments = gitBadges.length > 0 || adoBadges.length > 0;
 
   return (
     <div
       className={`bg-[--color-surface] border border-[--color-border] rounded-lg overflow-hidden border-l-3 mb-3 ${borderClass} ${isAbandoned ? 'opacity-65' : ''}`}
     >
-      {/* Row 1: Breadcrumbs + runtime + status */}
+      {/* Row 1: Breadcrumbs + status + stop */}
       <div
         className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-[--color-surface-hover] transition-colors"
         onClick={() => toggleExpand(key)}
@@ -172,14 +197,6 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
         />
         <PowerlineBreadcrumbs run={run} />
         <div className="flex items-center gap-2.5 ml-auto shrink-0">
-          {titleMetrics.length > 0 && (
-            <span className="flex items-center gap-2 border-r border-[--color-border] pr-2.5">
-              {titleMetrics}
-            </span>
-          )}
-          {run.status === 'running' && run.started_at && (
-            <DurationTicker startedAt={run.started_at} className="text-[--color-text2] text-sm tabular-nums" />
-          )}
           {statusLabel}
           <span onClick={(e) => e.stopPropagation()}>
             <ConfirmButton
@@ -192,13 +209,51 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
         </div>
       </div>
 
-      {/* Row 2: Enrichment badges (always visible when present) */}
-      {badges.length > 0 && (
-        <div
-          className="flex items-center gap-1.5 px-4 pb-2.5 pl-10 flex-wrap cursor-pointer"
-          onClick={() => toggleExpand(key)}
-        >
-          {badges}
+      {/* Row 2: Metrics (cost, tokens, duration) */}
+      <div
+        className="flex items-center gap-3 px-4 pb-2 pl-10 text-xs cursor-pointer"
+        onClick={() => toggleExpand(key)}
+      >
+        {run.status === 'running' && run.started_at && (
+          <span className="inline-flex items-center gap-1 text-[--color-text2]">
+            <Clock size={10} />
+            <DurationTicker startedAt={run.started_at} className="tabular-nums" />
+          </span>
+        )}
+        {run.total_cost > 0 && (
+          <span className="inline-flex items-center gap-0.5 text-yellow-300 tabular-nums">
+            <DollarSign size={10} />
+            {fmtCost2(run.total_cost)}
+          </span>
+        )}
+        {run.total_tokens > 0 && (
+          <span className="inline-flex items-center gap-0.5 text-cyan-300 tabular-nums">
+            <Zap size={10} />
+            {fmtTokens(run.total_tokens)}
+          </span>
+        )}
+        {run.iteration > 1 && (
+          <span className="text-purple-300 tabular-nums">
+            iter {run.iteration}
+          </span>
+        )}
+      </div>
+
+      {/* Enrichment groups */}
+      {hasEnrichments && (
+        <div className="px-4 pb-2.5 pl-10 space-y-1 cursor-pointer" onClick={() => toggleExpand(key)}>
+          {gitBadges.length > 0 && (
+            <>
+              <GroupDivider label="git" />
+              <div className="flex items-center gap-1.5 flex-wrap">{gitBadges}</div>
+            </>
+          )}
+          {adoBadges.length > 0 && (
+            <>
+              <GroupDivider label="ado" />
+              <div className="flex items-center gap-1.5 flex-wrap">{adoBadges}</div>
+            </>
+          )}
         </div>
       )}
 
