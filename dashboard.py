@@ -398,10 +398,10 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                             except (json.JSONDecodeError, ValueError):
                                 output = {}
                         if isinstance(output, dict):
-                            extracted_id = output.get(wid_field)
+                            extracted_id = output.get(wid_field) or output.get("work_item_id")
                             if extracted_id:
                                 run.work_item_id = str(extracted_id)
-                            run.work_item_title = output.get("epic_title", "")
+                            run.work_item_title = output.get("epic_title", "") or output.get("title", "")
                             run.work_item_type = output.get("item_type", "")
                             if run.work_item_title and not run.purpose:
                                 run.purpose = run.work_item_title
