@@ -2290,6 +2290,18 @@ async def api_open_folder(path: str):
     return {"ok": False, "error": "Folder not found"}
 
 
+@app.get("/api/open-file", include_in_schema=False)
+async def api_open_file(path: str):
+    """Open a file in Explorer (selects it) or the default application."""
+    import subprocess
+    fpath = Path(path)
+    if fpath.exists() and fpath.is_file():
+        # /select highlights the file in Explorer
+        subprocess.Popen(["explorer", "/select,", str(fpath)])
+        return {"ok": True}
+    return {"ok": False, "error": "File not found"}
+
+
 @app.get("/api/run/{port:int}/state", include_in_schema=False)
 async def api_run_state(port: int):
     """Proxy a conductor instance's /api/state to avoid CORS issues."""

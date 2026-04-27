@@ -5,7 +5,7 @@ import { RunDetailPanel } from './RunDetailPanel';
 import { DurationTicker } from '@/components/shared/DurationTicker';
 import { WorkItemIcon } from '@/components/shared/WorkItemIcon';
 import { ConfirmButton } from '@/components/shared/ConfirmButton';
-import { actionStop } from '@/lib/api';
+import { actionStop, openFile } from '@/lib/api';
 import { fmtCost2, fmtTokens } from '@/lib/format';
 import type { RunData } from '@/types/dashboard';
 
@@ -186,11 +186,32 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
   if (run.log_file) {
     const fname = run.log_file.replace(/\\/g, '/').split('/').pop() || run.log_file;
     conductorBadges.push(
-      <span key="log" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-800/60 border border-slate-600/40 text-slate-300 truncate max-w-[500px]" title={run.log_file}>
+      <button
+        key="events"
+        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-800/60 border border-slate-600/40 text-slate-300 truncate max-w-[500px] hover:bg-slate-700/60 hover:border-slate-500/50 transition-colors cursor-pointer"
+        title={`Open: ${run.log_file}`}
+        onClick={(e) => { e.stopPropagation(); openFile(run.log_file); }}
+      >
         <FileText size={10} className="shrink-0 opacity-60" />
         <span className="truncate">{fname}</span>
-      </span>,
+      </button>,
     );
+    // Conductor log file (non-events log alongside the events jsonl)
+    const logFile = run.log_file.replace(/\.events\.jsonl$/, '.log');
+    if (logFile !== run.log_file) {
+      const logName = logFile.replace(/\\/g, '/').split('/').pop() || logFile;
+      conductorBadges.push(
+        <button
+          key="log"
+          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-800/60 border border-slate-600/40 text-slate-300 truncate max-w-[500px] hover:bg-slate-700/60 hover:border-slate-500/50 transition-colors cursor-pointer"
+          title={`Open: ${logFile}`}
+          onClick={(e) => { e.stopPropagation(); openFile(logFile); }}
+        >
+          <FileText size={10} className="shrink-0 opacity-60" />
+          <span className="truncate">{logName}</span>
+        </button>,
+      );
+    }
   }
   if (run.run_id) {
     conductorBadges.push(

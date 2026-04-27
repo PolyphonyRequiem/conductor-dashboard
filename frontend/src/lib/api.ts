@@ -44,3 +44,7 @@ export async function actionStop(logFile: string): Promise<ActionResult> {
   });
   return resp.json() as Promise<ActionResult>;
 }
+
+export async function openFile(filePath: string): Promise<void> {
+  await fetch(`/api/open-file?path=${encodeURIComponent(filePath)}`);
+}
