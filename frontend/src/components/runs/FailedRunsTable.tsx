@@ -44,6 +44,7 @@ export function FailedRunsTable({ runs }: Props) {
               <th className="text-left px-3 py-2.5 text-xs uppercase tracking-wide text-[--color-text2] font-semibold">Error</th>
               <th className="text-left px-3 py-2.5 text-xs uppercase tracking-wide text-[--color-text2] font-semibold">Agent</th>
               <th className="text-left px-3 py-2.5 text-xs uppercase tracking-wide text-[--color-text2] font-semibold">Started</th>
+              <th className="text-left px-3 py-2.5 text-xs uppercase tracking-wide text-[--color-text2] font-semibold">Duration</th>
               <th className="text-right px-3 py-2.5 text-xs uppercase tracking-wide text-[--color-text2] font-semibold">Cost</th>
               <th className="text-right px-3 py-2.5 text-xs uppercase tracking-wide text-[--color-text2] font-semibold">Actions</th>
             </tr>
@@ -122,8 +123,16 @@ function FailedRow({ run, isExpanded, isReviewed, onToggleExpand, onToggleReview
             <span className="px-1.5 py-0.5 rounded text-xs bg-red-900/50 text-red-300">{run.error_type}</span>
           )}
         </td>
-        <td className="px-3 py-2 text-[--color-yellow]">{run.failed_agent || '—'}</td>
+        <td className="px-3 py-2">
+          <span className="text-[--color-yellow]">{run.failed_agent || '—'}</span>
+          {run.failed_subworkflow_path && (
+            <div className="text-[10px] text-[--color-text2] mt-0.5 truncate max-w-[200px]" title={run.failed_subworkflow_path}>
+              {run.failed_subworkflow_path}
+            </div>
+          )}
+        </td>
         <td className="px-3 py-2 text-[--color-text2] text-xs whitespace-nowrap">{run.started_at_str}</td>
+        <td className="px-3 py-2 text-[--color-text2] whitespace-nowrap">{run.elapsed || '—'}</td>
         <td className="px-3 py-2 text-right">{run.cost_str}</td>
         <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
           <div className="flex gap-1 justify-end">
@@ -152,7 +161,7 @@ function FailedRow({ run, isExpanded, isReviewed, onToggleExpand, onToggleReview
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan={7} className="p-0">
+          <td colSpan={8} className="p-0">
             <RunDetailPanel run={run} />
           </td>
         </tr>

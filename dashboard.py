@@ -67,6 +67,7 @@ class WorkflowRun:
     error_type: str = ""
     error_message: str = ""
     failed_agent: str = ""
+    failed_subworkflow_path: str = ""  # e.g. "foreach>builder" — chain of subworkflows leading to failure
     total_cost: float = 0.0
     total_tokens: int = 0
     agents: list[AgentRun] = field(default_factory=list)
@@ -448,6 +449,13 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                                 sw["status"] = "completed"
                                 break
 
+                elif etype == "agent_failed":
+                    aname = data.get("agent_name", "")
+                    if aname:
+                        # Track the most recent agent-level failure — this is
+                        # the real agent that errored, even inside subworkflows.
+                        run.failed_agent = aname
+
                 elif etype == "workflow_failed":
                     wf_depth = max(0, wf_depth - 1)
                     if wf_depth == 0:
@@ -455,7 +463,10 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         run.ended_at = ts
                         run.error_type = data.get("error_type", "")
                         run.error_message = data.get("message", "")
-                        run.failed_agent = data.get("agent_name", "")
+                        # Only set failed_agent from workflow_failed if no
+                        # agent_failed event already captured the real agent.
+                        if not run.failed_agent:
+                            run.failed_agent = data.get("agent_name", "")
                     else:
                         for sw in reversed(run.subworkflows):
                             if sw["status"] == "running":
@@ -491,6 +502,14 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                             sw["elapsed"] = data.get("elapsed", 0)
                             break
 
+                elif etype == "subworkflow_failed":
+                    aname = data.get("agent_name", "")
+                    for sw in reversed(run.subworkflows):
+                        if sw["agent"] == aname and sw["status"] == "running":
+                            sw["status"] = "failed"
+                            sw["elapsed"] = data.get("elapsed", 0)
+                            break
+
                 # Track latest timestamp
                 if ts:
                     if ts > run.last_event_ts:
@@ -507,6 +526,12 @@ def _parse_event_log(path: Path) -> WorkflowRun:
     if pending_gates:
         run.gate_waiting = True
         run.gate_agent = next(iter(pending_gates))
+
+    # Build failed_subworkflow_path from subworkflows that ended in "failed".
+    failed_sws = [sw for sw in run.subworkflows if sw["status"] == "failed"]
+    if failed_sws:
+        path_parts = [sw["workflow"] or sw["agent"] for sw in failed_sws]
+        run.failed_subworkflow_path = " > ".join(path_parts)
 
     # Post-parse invariant: "completed" is impossible while subworkflows are
     # still running.  If we see this state it means depth tracking was thrown
@@ -963,6 +988,7 @@ def _run_to_raw(r: WorkflowRun) -> dict:
             for a in r.agents
         ],
         "failed_agent": r.failed_agent,
+        "failed_subworkflow_path": r.failed_subworkflow_path,
         "error_type": r.error_type,
         "duration_sec": duration_sec,
     }
@@ -2500,6 +2526,7 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
             "error_type": r.error_type,
             "error_message": r.error_message,
             "failed_agent": r.failed_agent,
+            "failed_subworkflow_path": r.failed_subworkflow_path,
             "total_cost": r.total_cost,
             "cost_str": f"${r.total_cost:.4f}" if r.total_cost else "—",
             "total_tokens": r.total_tokens,
@@ -2614,6 +2641,7 @@ def _serialize_run(r: WorkflowRun, name_to_port: dict[str, int],
         "error_type": r.error_type,
         "error_message": r.error_message,
         "failed_agent": r.failed_agent,
+        "failed_subworkflow_path": r.failed_subworkflow_path,
         "total_cost": r.total_cost,
         "cost_str": f"${r.total_cost:.4f}" if r.total_cost else "—",
         "total_tokens": r.total_tokens,

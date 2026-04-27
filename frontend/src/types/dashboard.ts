@@ -54,6 +54,7 @@ export interface RunData {
   error_type: string;
   error_message: string;
   failed_agent: string;
+  failed_subworkflow_path: string;
   total_cost: number;
   cost_str: string;
   total_tokens: number;
@@ -230,6 +231,7 @@ export interface RawRun {
   total_tokens: number;
   agents: AgentData[];
   failed_agent: string;
+  failed_subworkflow_path: string;
   error_type: string;
   duration_sec: number;
 }
