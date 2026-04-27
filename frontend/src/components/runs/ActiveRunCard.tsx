@@ -222,27 +222,42 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
     );
   }
 
-  // Metadata group (user-defined key-value pairs from workflow metadata)
+  // Metadata group — merge workflow metadata + useful system_meta fields
   const metaBadges: React.ReactNode[] = [];
   const metaSkipKeys = new Set(['cwd', 'workitem_id', 'work_item_id', 'input_work_item_id', 'worktree_name', 'dashboard_hidden']);
+  const sysSkipKeys = new Set(['pid', 'log_file', 'run_id', 'started_at', 'bg_mode', 'dashboard_port', 'dashboard_url', 'parent_pid', 'cwd']);
+
+  // Workflow metadata first
+  const allMeta: [string, unknown][] = [];
   if (run.metadata && typeof run.metadata === 'object') {
-    for (const [k, v] of Object.entries(run.metadata)) {
-      if (metaSkipKeys.has(k) || v === null || v === undefined || v === '') continue;
-      const display = typeof v === 'object' ? JSON.stringify(v) : String(v);
-      const isUrl = typeof v === 'string' && (v.startsWith('http://') || v.startsWith('https://'));
-      metaBadges.push(
-        <span key={`meta-${k}`} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-900/25 border border-indigo-700/30 text-indigo-300 truncate max-w-[400px]" title={`${k}: ${display}`}>
-          <span className="opacity-60">{k}</span>
-          {isUrl ? (
-            <a href={v as string} target="_blank" rel="noopener noreferrer" className="truncate hover:underline" onClick={(e) => e.stopPropagation()}>
-              {display} <ExternalLink size={8} className="inline shrink-0 opacity-50" />
-            </a>
-          ) : (
-            <span className="truncate">{display}</span>
-          )}
-        </span>,
-      );
+    allMeta.push(...Object.entries(run.metadata));
+  }
+  // Then system_meta (non-duplicate, non-skipped)
+  if (run.system_meta && typeof run.system_meta === 'object') {
+    const metaKeys = new Set(allMeta.map(([k]) => k));
+    for (const [k, v] of Object.entries(run.system_meta)) {
+      if (!sysSkipKeys.has(k) && !metaKeys.has(k)) {
+        allMeta.push([k, v]);
+      }
     }
+  }
+
+  for (const [k, v] of allMeta) {
+    if (metaSkipKeys.has(k) || v === null || v === undefined || v === '') continue;
+    const display = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    const isUrl = typeof v === 'string' && (v.startsWith('http://') || v.startsWith('https://'));
+    metaBadges.push(
+      <span key={`meta-${k}`} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-900/25 border border-indigo-700/30 text-indigo-300 truncate max-w-[400px]" title={`${k}: ${display}`}>
+        <span className="opacity-60">{k}</span>
+        {isUrl ? (
+          <a href={v as string} target="_blank" rel="noopener noreferrer" className="truncate hover:underline" onClick={(e) => e.stopPropagation()}>
+            {display} <ExternalLink size={8} className="inline shrink-0 opacity-50" />
+          </a>
+        ) : (
+          <span className="truncate">{display}</span>
+        )}
+      </span>,
+    );
   }
 
   const hasAllEnrichments = hasEnrichments || conductorBadges.length > 0 || metaBadges.length > 0;
