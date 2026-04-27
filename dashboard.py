@@ -452,9 +452,13 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                 elif etype == "agent_failed":
                     aname = data.get("agent_name", "")
                     if aname:
-                        # Track the most recent agent-level failure — this is
-                        # the real agent that errored, even inside subworkflows.
                         run.failed_agent = aname
+
+                elif etype in ("for_each_item_failed",):
+                    # Deepest failure point — capture the group/agent name
+                    # before workflow_failed events bubble it up.
+                    if not run.failed_agent:
+                        run.failed_agent = data.get("group_name", "") or data.get("agent_name", "")
 
                 elif etype == "workflow_failed":
                     wf_depth = max(0, wf_depth - 1)
@@ -463,11 +467,15 @@ def _parse_event_log(path: Path) -> WorkflowRun:
                         run.ended_at = ts
                         run.error_type = data.get("error_type", "")
                         run.error_message = data.get("message", "")
-                        # Only set failed_agent from workflow_failed if no
-                        # agent_failed event already captured the real agent.
+                        # Only set failed_agent from the top-level workflow_failed
+                        # if no deeper event already captured the real agent.
                         if not run.failed_agent:
                             run.failed_agent = data.get("agent_name", "")
                     else:
+                        # Inner workflow_failed — capture the deepest agent_name
+                        # as the real failure point (first inner failure wins).
+                        if not run.failed_agent:
+                            run.failed_agent = data.get("agent_name", "")
                         for sw in reversed(run.subworkflows):
                             if sw["status"] == "running":
                                 sw["status"] = "failed"
@@ -528,9 +536,11 @@ def _parse_event_log(path: Path) -> WorkflowRun:
         run.gate_agent = next(iter(pending_gates))
 
     # Build failed_subworkflow_path from subworkflows that ended in "failed".
+    # Use agent name (the subworkflow node) for readability, with workflow
+    # file as fallback.
     failed_sws = [sw for sw in run.subworkflows if sw["status"] == "failed"]
     if failed_sws:
-        path_parts = [sw["workflow"] or sw["agent"] for sw in failed_sws]
+        path_parts = [sw["agent"] or sw["workflow"] for sw in failed_sws]
         run.failed_subworkflow_path = " > ".join(path_parts)
 
     # Post-parse invariant: "completed" is impossible while subworkflows are
