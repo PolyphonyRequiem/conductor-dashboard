@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, GitBranch, DollarSign, Zap, Tag, Clock } from 'lucide-react';
+import { ChevronRight, ExternalLink, GitBranch, DollarSign, Zap, Tag, Clock, FileText } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { PowerlineBreadcrumbs } from './PowerlineBreadcrumbs';
 import { RunDetailPanel } from './RunDetailPanel';
@@ -181,6 +181,51 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
 
   const hasEnrichments = gitBadges.length > 0 || adoBadges.length > 0;
 
+  // Conductor group (log file, run_id)
+  const conductorBadges: React.ReactNode[] = [];
+  if (run.log_file) {
+    const fname = run.log_file.replace(/\\/g, '/').split('/').pop() || run.log_file;
+    conductorBadges.push(
+      <span key="log" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-800/60 border border-slate-600/40 text-slate-300 truncate max-w-[500px]" title={run.log_file}>
+        <FileText size={10} className="shrink-0 opacity-60" />
+        <span className="truncate">{fname}</span>
+      </span>,
+    );
+  }
+  if (run.run_id) {
+    conductorBadges.push(
+      <span key="rid" className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-800/60 border border-slate-600/40 text-slate-300">
+        <span className="opacity-60">run</span>
+        <span className="font-mono">{run.run_id}</span>
+      </span>,
+    );
+  }
+
+  // Metadata group (user-defined key-value pairs from workflow metadata)
+  const metaBadges: React.ReactNode[] = [];
+  const metaSkipKeys = new Set(['cwd', 'workitem_id', 'work_item_id', 'input_work_item_id', 'worktree_name', 'dashboard_hidden']);
+  if (run.metadata && typeof run.metadata === 'object') {
+    for (const [k, v] of Object.entries(run.metadata)) {
+      if (metaSkipKeys.has(k) || v === null || v === undefined || v === '') continue;
+      const display = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      const isUrl = typeof v === 'string' && (v.startsWith('http://') || v.startsWith('https://'));
+      metaBadges.push(
+        <span key={`meta-${k}`} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-900/25 border border-indigo-700/30 text-indigo-300 truncate max-w-[400px]" title={`${k}: ${display}`}>
+          <span className="opacity-60">{k}</span>
+          {isUrl ? (
+            <a href={v as string} target="_blank" rel="noopener noreferrer" className="truncate hover:underline" onClick={(e) => e.stopPropagation()}>
+              {display} <ExternalLink size={8} className="inline shrink-0 opacity-50" />
+            </a>
+          ) : (
+            <span className="truncate">{display}</span>
+          )}
+        </span>,
+      );
+    }
+  }
+
+  const hasAllEnrichments = hasEnrichments || conductorBadges.length > 0 || metaBadges.length > 0;
+
   const displayTitle = run.display_title || '';
 
   return (
@@ -243,7 +288,7 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
       </div>
 
       {/* Enrichment groups */}
-      {hasEnrichments && (
+      {hasAllEnrichments && (
         <div className="px-4 pb-2.5 pl-10 space-y-1 cursor-pointer" onClick={() => toggleExpand(key)}>
           {gitBadges.length > 0 && (
             <>
@@ -255,6 +300,18 @@ export function ActiveRunCard({ run, index, keyPrefix }: Props) {
             <>
               <GroupDivider label="ado" />
               <div className="flex items-center gap-1.5 flex-wrap">{adoBadges}</div>
+            </>
+          )}
+          {metaBadges.length > 0 && (
+            <>
+              <GroupDivider label="metadata" />
+              <div className="flex items-center gap-1.5 flex-wrap">{metaBadges}</div>
+            </>
+          )}
+          {conductorBadges.length > 0 && (
+            <>
+              <GroupDivider label="conductor" />
+              <div className="flex items-center gap-1.5 flex-wrap">{conductorBadges}</div>
             </>
           )}
         </div>
