@@ -46,8 +46,9 @@ def _hierarchy_order(found_types: set[str]) -> list[str]:
 _hierarchy_cache: dict[int, tuple[float, dict | None]] = {}
 _HIERARCHY_TTL = 15  # seconds
 
-# Cache: cwd -> resolved DB path (or None)
-_db_path_cache: dict[str, Path | None] = {}
+# Cache: cwd -> (timestamp, resolved DB path or None)
+_db_path_cache: dict[str, tuple[float, Path | None]] = {}
+_DB_PATH_TTL = 120  # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -63,8 +64,10 @@ def _resolve_twig_db(cwd: Path, metadata: dict) -> Path | None:
       4. Fall back to hardcoded paths
     """
     cache_key = str(cwd) + "|" + metadata.get("project_url", "")
-    if cache_key in _db_path_cache:
-        return _db_path_cache[cache_key]
+    now = time.time()
+    cached = _db_path_cache.get(cache_key)
+    if cached and (now - cached[0]) < _DB_PATH_TTL:
+        return cached[1]
 
     result: Path | None = None
 
@@ -114,7 +117,7 @@ def _resolve_twig_db(cwd: Path, metadata: dict) -> Path | None:
                 result = fallback
                 break
 
-    _db_path_cache[cache_key] = result
+    _db_path_cache[cache_key] = (time.time(), result)
     return result
 
 
